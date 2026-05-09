@@ -1,0 +1,90 @@
+from __future__ import annotations
+
+import pytest
+
+from openexam.extractors.docx import extract_docx
+from openexam.extractors.pdf import extract_pdf
+from openexam.extractors.pptx import extract_pptx
+from openexam.extractors.text import extract_text_file
+from openexam.config import AppConfig
+from openexam.ingest import ingest_directory
+
+
+def test_text_extractor_preserves_paragraphs(tmp_path) -> None:
+    path = tmp_path / "notes.md"
+    path.write_text("first paragraph\n\nsecond paragraph with CNN", encoding="utf-8")
+
+    sections = extract_text_file(path)
+
+    assert [section.paragraph_index for section in sections] == [1, 2]
+    assert sections[1].location_label == "para.2"
+    assert "CNN" in sections[1].text
+
+
+def test_docx_extractor_preserves_paragraphs(tmp_path) -> None:
+    docx = pytest.importorskip("docx")
+    path = tmp_path / "sample.docx"
+    document = docx.Document()
+    document.add_paragraph("regularization")
+    document.add_paragraph("optimization")
+    document.save(path)
+
+    sections = extract_docx(path)
+
+    assert [section.paragraph_index for section in sections] == [1, 2]
+    assert sections[0].location_type == "paragraph"
+
+
+def test_pptx_extractor_preserves_slides(tmp_path) -> None:
+    pptx = pytest.importorskip("pptx")
+    path = tmp_path / "sample.pptx"
+    presentation = pptx.Presentation()
+    slide = presentation.slides.add_slide(presentation.slide_layouts[5])
+    slide.shapes.title.text = "GAN"
+    slide = presentation.slides.add_slide(presentation.slide_layouts[5])
+    slide.shapes.title.text = "diffusion"
+    presentation.save(path)
+
+    sections = extract_pptx(path)
+
+    assert [section.slide_number for section in sections] == [1, 2]
+    assert sections[0].location_label == "slide.1"
+
+
+def test_pdf_extractor_preserves_pages(tmp_path) -> None:
+    fitz = pytest.importorskip("fitz")
+    path = tmp_path / "sample.pdf"
+    document = fitz.open()
+    page = document.new_page()
+    page.insert_text((72, 72), "CNN convolution")
+    page = document.new_page()
+    page.insert_text((72, 72), "Transformer attention")
+    document.save(path)
+    document.close()
+
+    sections = extract_pdf(path)
+
+    assert [section.page_number for section in sections] == [1, 2]
+    assert sections[1].location_label == "p.2"
+
+
+def test_empty_directory_does_not_crash(tmp_path) -> None:
+    config = AppConfig(index_dir=tmp_path / ".openexam")
+
+    stats = ingest_directory(tmp_path, config=config, rebuild=True)
+
+    assert stats.scanned_files == 0
+    assert stats.indexed_files == 0
+    assert stats.failed_files == 0
+
+
+def test_damaged_pdf_is_recorded_as_failure(tmp_path) -> None:
+    path = tmp_path / "坏 文件+OCR.pdf"
+    path.write_bytes(b"not a real pdf")
+    config = AppConfig(index_dir=tmp_path / ".openexam")
+
+    stats = ingest_directory(tmp_path, config=config, rebuild=True)
+
+    assert stats.scanned_files == 1
+    assert stats.failed_files == 1
+    assert stats.errors

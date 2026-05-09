@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "openexam"
+version = "0.1.0"
+description = "Offline open-book exam material search over local documents."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "pydantic>=2.0",
+  "streamlit>=1.30",
+  "rapidfuzz>=3.0",
+  "pymupdf>=1.23",
+  "python-docx>=1.1",
+  "python-pptx>=0.6.23",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0",
+]
+
+[tool.setuptools.packages.find]
+include = ["openexam*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
