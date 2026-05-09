@@ -4,6 +4,7 @@ from pathlib import Path
 
 from openexam.config import AppConfig
 from openexam.db import connect
+from openexam.embeddings import EmbeddingError
 from openexam.ingest import ingest_directory
 from openexam.search import search_index
 
@@ -99,3 +100,47 @@ def test_fuzzy_mode_handles_chinese_typo(tmp_path) -> None:
     assert results
     assert results[0].file_name == "cnn.md"
     assert results[0].fuzzy_text_score > 0.8
+
+
+def test_semantic_mode_uses_semantic_scores(tmp_path, monkeypatch) -> None:
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    (data_dir / "cnn.md").write_text("卷积神经网络依靠局部连接和权值共享。", encoding="utf-8")
+    (data_dir / "gan.md").write_text("生成对抗网络包含生成器和判别器。", encoding="utf-8")
+    config = AppConfig(index_dir=tmp_path / ".openexam", chunk_size=800, chunk_overlap=120)
+    ingest_directory(data_dir, config=config, rebuild=True)
+
+    conn = connect(config.db_path)
+    try:
+        cnn_id = conn.execute("SELECT id FROM chunks WHERE file_name = ?", ("cnn.md",)).fetchone()["id"]
+    finally:
+        conn.close()
+
+    def fake_semantic_scores(query, config, limit):
+        return {cnn_id: 0.93}
+
+    monkeypatch.setattr("openexam.search.semantic_scores", fake_semantic_scores)
+    results = search_index("局部连接 权值共享", top_k=3, config=config, mode="semantic")
+
+    assert results
+    assert results[0].file_name == "cnn.md"
+    assert results[0].semantic_score == 0.93
+    assert results[0].match_type == "semantic"
+
+
+def test_hybrid_falls_back_when_semantic_unavailable(tmp_path, monkeypatch) -> None:
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    (data_dir / "transformer.md").write_text("Transformer attention mechanism", encoding="utf-8")
+    config = AppConfig(index_dir=tmp_path / ".openexam", chunk_size=800, chunk_overlap=120)
+    ingest_directory(data_dir, config=config, rebuild=True)
+
+    def broken_semantic_scores(query, config, limit):
+        raise EmbeddingError("Ollama is not reachable")
+
+    monkeypatch.setattr("openexam.search.semantic_scores", broken_semantic_scores)
+    results = search_index("Transformer", top_k=3, config=config, mode="hybrid")
+
+    assert results
+    assert results[0].file_name == "transformer.md"
+    assert results[0].semantic_score == 0.0

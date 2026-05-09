@@ -2,7 +2,7 @@
 
 OpenExam is an offline local search tool for open-book exams. It indexes local course files and returns source-backed results: file name, path, page/slide/paragraph location, snippet, and relevance score.
 
-It does not use cloud APIs, online model services, OCR, FAISS, Chroma, embeddings, or LLM answer generation in the MVP.
+It does not use cloud APIs, online model services, OCR, FAISS, Chroma, or LLM answer generation. Optional semantic search uses a local Ollama embedding model only.
 
 ## Supported Files
 
@@ -64,9 +64,52 @@ Search modes:
 
 - `keyword`: SQLite FTS5 plus local substring fallback.
 - `fuzzy`: rapidfuzz partial-ratio fuzzy matching.
-- `hybrid`: default mode, combining FTS5, substring, and fuzzy scores.
+- `semantic`: local cosine-similarity search over Ollama embeddings.
+- `hybrid`: default mode, combining FTS5, substring, fuzzy, and semantic scores when a semantic index exists.
 
 Results include mode, score, file name, page/slide/paragraph, snippet, and full path. Chinese snippets are centered around local substring matches where possible.
+
+## Semantic Search
+
+Semantic search is optional and local. It uses Ollama at `http://127.0.0.1:11434` with the default embedding model `bge-m3`.
+
+OpenExam never pulls models automatically. Before the exam, while online, install Ollama and pull the model yourself:
+
+```bash
+ollama pull bge-m3
+```
+
+When using semantic search, start Ollama locally:
+
+```bash
+ollama serve
+```
+
+Build embeddings after ingest:
+
+```bash
+python -m openexam embed
+```
+
+Embedding files are saved locally:
+
+```text
+.openexam/embeddings_bge-m3.npy
+.openexam/embeddings_bge-m3.json
+```
+
+Run semantic search:
+
+```bash
+python -m openexam search "Transformer 中注意力机制的作用" --top-k 5 --mode semantic
+```
+
+Notes:
+
+- If Ollama is not running, `embed` tells you to run `ollama serve`.
+- If `bge-m3` is missing, `embed` tells you to run `ollama pull bge-m3` while online.
+- If chunks, text hashes, or embedding model change, rerun `python -m openexam embed`.
+- `hybrid` falls back to keyword/fuzzy search if the semantic index is missing or stale.
 
 ## Streamlit UI
 
@@ -117,13 +160,22 @@ Use this checklist before the exam, while network access is still available:
    python -m openexam search "生成对抗网络" --top-k 3 --mode hybrid
    ```
 
-6. Start the local UI once and confirm it loads:
+6. If semantic search is needed, prepare the local embedding index:
+
+   ```bash
+   ollama pull bge-m3
+   ollama serve
+   python -m openexam embed
+   python -m openexam search "Transformer 中注意力机制的作用" --top-k 3 --mode semantic
+   ```
+
+7. Start the local UI once and confirm it loads:
 
    ```bash
    streamlit run openexam/app.py --server.address 127.0.0.1
    ```
 
-7. Disconnect from the network and repeat one CLI search against the existing index.
+8. Disconnect from the network and repeat one CLI search against the existing index.
 
 ## Offline Usage
 
@@ -150,10 +202,12 @@ These commands use the real local DeepLearning PDF directory:
 cd /Users/lin/Documents/Code/Homework/OpenExam
 
 python3 -m openexam ingest "/Users/lin/Documents/Code/Homework/DeepLearning/data" --rebuild
+python3 -m openexam embed
 python3 -m openexam search "Transformer" --top-k 5 --mode hybrid
 python3 -m openexam search "正则化 优化" --top-k 5 --mode hybrid
 python3 -m openexam search "生成对抗网络" --top-k 5 --mode hybrid
 python3 -m openexam search "卷积神经网络" --top-k 5 --mode hybrid
+python3 -m openexam search "Transformer 中注意力机制的作用" --top-k 5 --mode semantic
 python3 -m pytest
 streamlit run openexam/app.py --server.address 127.0.0.1
 ```
@@ -168,7 +222,8 @@ Expected behavior:
 
 - OCR is not implemented. Scanned PDFs without embedded text cannot be searched.
 - Chinese search uses SQLite FTS5 plus substring and rapidfuzz fallback; it is not a full Chinese word-segmentation engine.
-- The MVP does not include FAISS, Chroma, Ollama, embeddings, local LLM Q&A, cloud APIs, or automatic model downloads.
+- Semantic search requires a local Ollama service and a pre-pulled `bge-m3` model.
+- The MVP does not include FAISS, Chroma, local LLM Q&A, cloud APIs, or automatic model downloads.
 - Search quality depends on the quality of text extracted from the source file.
 
 ## Development Tests

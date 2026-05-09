@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import hashlib
 import unicodedata
 
 
@@ -15,6 +16,10 @@ def normalize_text(text: str) -> str:
     text = PUNCT_RE.sub(" ", text)
     text = SPACE_RE.sub(" ", text)
     return text.strip()
+
+
+def sha256_text(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 def split_query_terms(query: str) -> list[str]:

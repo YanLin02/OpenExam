@@ -26,14 +26,18 @@ def combine_hybrid_scores(
     substring_score: float,
     fuzzy_text_score: float,
     fuzzy_filename_score: float,
+    semantic_score: float = 0.0,
 ) -> float:
-    return round(
-        (
-            0.35 * fts_score
-            + 0.35 * substring_score
-            + 0.20 * fuzzy_text_score
-            + 0.10 * fuzzy_filename_score
+    fuzzy_score = max(fuzzy_text_score, fuzzy_filename_score * 0.8)
+    if semantic_score > 0:
+        return round(
+            (
+                0.35 * fts_score
+                + 0.15 * substring_score
+                + 0.15 * fuzzy_score
+                + 0.35 * semantic_score
+            )
+            * 100,
+            2,
         )
-        * 100,
-        2,
-    )
+    return round((0.35 * fts_score + 0.35 * substring_score + 0.20 * fuzzy_text_score + 0.10 * fuzzy_filename_score) * 100, 2)

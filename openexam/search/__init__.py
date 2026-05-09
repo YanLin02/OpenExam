@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import sqlite3
+import re
 from typing import Literal
 
 from openexam.config import DEFAULT_CONFIG, AppConfig
+from openexam.embeddings import EmbeddingError, semantic_scores
 from openexam.models import SearchResult
 from openexam.search.fts import all_chunks_for_fuzzy, fts_search, normalized_query
 from openexam.search.fuzzy import fuzzy_score
@@ -16,10 +18,40 @@ from openexam.search.rank import (
 from openexam.text_utils import make_snippet, substring_score
 
 
-SearchMode = Literal["keyword", "fuzzy", "hybrid"]
+SearchMode = Literal["keyword", "fuzzy", "hybrid", "semantic"]
+CJK_RE = re.compile(r"[\u4e00-\u9fff]+")
 
 
-def _match_type(fts_value: float, substring_value: float, fuzzy_value: float, mode: SearchMode) -> str:
+def _cjk_bigrams(text: str) -> list[str]:
+    compact = "".join(CJK_RE.findall(text))
+    if len(compact) < 2:
+        return [compact] if compact else []
+    return [compact[index : index + 2] for index in range(len(compact) - 1)]
+
+
+def _lexical_overlap_score(query_norm: str, text_norm: str) -> float:
+    grams = _cjk_bigrams(query_norm)
+    if not grams:
+        terms = [term for term in query_norm.split() if term]
+        if not terms:
+            return 0.0
+        return sum(1 for term in terms if term in text_norm) / len(terms)
+    return sum(1 for gram in grams if gram in text_norm) / len(grams)
+
+
+def _content_score(text_norm: str) -> float:
+    return min(len(text_norm) / 350.0, 1.0)
+
+
+def _semantic_relevance_score(query_norm: str, text_norm: str, semantic_score: float) -> float:
+    if semantic_score <= 0:
+        return 0.0
+    lexical = _lexical_overlap_score(query_norm, text_norm)
+    content = _content_score(text_norm)
+    return min(1.0, 0.82 * semantic_score + 0.10 * content + 0.08 * lexical)
+
+
+def _match_type(fts_value: float, substring_value: float, fuzzy_value: float, semantic_value: float, mode: SearchMode) -> str:
     parts: list[str] = []
     if mode in {"keyword", "hybrid"} and fts_value > 0:
         parts.append("fts")
@@ -27,6 +59,8 @@ def _match_type(fts_value: float, substring_value: float, fuzzy_value: float, mo
         parts.append("substring")
     if mode in {"fuzzy", "hybrid"} and fuzzy_value > 0:
         parts.append("fuzzy")
+    if mode in {"semantic", "hybrid"} and semantic_value > 0:
+        parts.append("semantic")
     return "+".join(parts) if parts else mode
 
 
@@ -36,8 +70,8 @@ def search_index(
     config: AppConfig = DEFAULT_CONFIG,
     mode: SearchMode = "hybrid",
 ) -> list[SearchResult]:
-    if mode not in {"keyword", "fuzzy", "hybrid"}:
-        raise ValueError("mode must be one of: keyword, fuzzy, hybrid")
+    if mode not in {"keyword", "fuzzy", "hybrid", "semantic"}:
+        raise ValueError("mode must be one of: keyword, fuzzy, hybrid, semantic")
 
     query_norm = normalized_query(query)
     if not query_norm:
@@ -52,6 +86,7 @@ def search_index(
 
         candidates: dict[int, sqlite3.Row] = {int(row["chunk_db_id"]): row for row in fts_rows}
         all_rows = all_chunks_for_fuzzy(conn, config.fuzzy_scan_limit)
+        all_by_id = {int(row["chunk_db_id"]): row for row in all_rows}
 
         substring_scores: dict[int, float] = {}
         if mode in {"keyword", "hybrid"}:
@@ -77,20 +112,37 @@ def search_index(
             for _, row in fuzzy_ranked[: config.fuzzy_candidate_limit]:
                 candidates.setdefault(int(row["chunk_db_id"]), row)
 
+        semantic_score_map: dict[int, float] = {}
+        if mode in {"semantic", "hybrid"}:
+            try:
+                semantic_score_map = semantic_scores(query, config=config, limit=config.semantic_candidate_limit)
+            except EmbeddingError:
+                if mode == "semantic":
+                    raise
+                semantic_score_map = {}
+            for chunk_db_id in semantic_score_map:
+                row = all_by_id.get(chunk_db_id)
+                if row is not None:
+                    candidates.setdefault(chunk_db_id, row)
+
         results: list[SearchResult] = []
         for chunk_db_id, row in candidates.items():
             fts_score = fts_norm.get(chunk_db_id, 0.0)
             sub_score = substring_scores.get(chunk_db_id, 0.0)
             text_score, filename_score = fuzzy_scores.get(chunk_db_id, (0.0, 0.0))
+            sem_score = semantic_score_map.get(chunk_db_id, 0.0)
+            sem_rank_score = _semantic_relevance_score(query_norm, row["text_norm"], sem_score)
             if mode == "keyword":
                 score = combine_keyword_scores(fts_score, sub_score)
             elif mode == "fuzzy":
                 score = combine_fuzzy_scores(text_score, filename_score)
+            elif mode == "semantic":
+                score = round(sem_rank_score * 100, 2)
             else:
-                score = combine_hybrid_scores(fts_score, sub_score, text_score, filename_score)
+                score = combine_hybrid_scores(fts_score, sub_score, text_score, filename_score, sem_rank_score)
             if score <= 0:
                 continue
-            match_type = _match_type(fts_score, sub_score, text_score, mode)
+            match_type = _match_type(fts_score, sub_score, text_score, sem_score, mode)
             results.append(
                 SearchResult(
                     chunk_db_id=chunk_db_id,
@@ -110,6 +162,7 @@ def search_index(
                     substring_score=round(sub_score, 4),
                     fuzzy_text_score=round(text_score, 4),
                     fuzzy_filename_score=round(filename_score, 4),
+                    semantic_score=round(sem_score, 4),
                     match_type=match_type,
                     mode=mode,
                 )

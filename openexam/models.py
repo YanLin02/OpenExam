@@ -59,5 +59,6 @@ class SearchResult(BaseModel):
     substring_score: float = 0.0
     fuzzy_text_score: float = 0.0
     fuzzy_filename_score: float = 0.0
+    semantic_score: float = 0.0
     match_type: str = "fts"
     mode: str = "hybrid"

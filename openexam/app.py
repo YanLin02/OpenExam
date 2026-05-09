@@ -6,6 +6,7 @@ import streamlit as st
 
 from openexam.config import DEFAULT_CONFIG
 from openexam.db import connect, failed_documents, index_stats
+from openexam.embeddings import EmbeddingError, embedding_status
 from openexam.ingest import ingest_directory
 from openexam.search import search_index
 
@@ -22,22 +23,28 @@ def format_location(result) -> str:
 
 def show_index_status() -> None:
     st.caption(f"Index path: {DEFAULT_CONFIG.db_path}")
+    semantic = embedding_status(DEFAULT_CONFIG)
+    st.caption(f"Semantic index path: {DEFAULT_CONFIG.embeddings_npy_path}")
     if not DEFAULT_CONFIG.db_path.exists():
         st.warning("索引不存在。请先输入资料目录并建立索引。")
-        col1, col2, col3 = st.columns(3)
+        col1, col2, col3, col4 = st.columns(4)
         col1.metric("Documents", 0)
         col2.metric("Failed", 0)
         col3.metric("Chunks", 0)
+        col4.metric("Semantic", "missing")
         return
 
     conn = connect(DEFAULT_CONFIG.db_path)
     try:
         stats = index_stats(conn)
-        col1, col2, col3, col4 = st.columns(4)
+        col1, col2, col3, col4, col5, col6 = st.columns(6)
         col1.metric("Documents", stats["documents"])
         col2.metric("Failed", stats["failed_documents"])
         col3.metric("Chunks", stats["chunks"])
         col4.metric("Latest", stats["latest_indexed_at"] or "-")
+        col5.metric("Semantic", "ready" if semantic.valid else "missing/stale")
+        col6.metric("Embeddings", semantic.vector_count)
+        st.caption(f"Embedding model: {semantic.model}. {semantic.message}")
         failures = failed_documents(conn, limit=10)
         if failures:
             with st.expander("Recent failed files"):
@@ -84,7 +91,7 @@ def main() -> None:
 
     st.divider()
     query = st.text_input("搜索", value="")
-    mode = st.selectbox("Search mode", options=["hybrid", "keyword", "fuzzy"], index=0)
+    mode = st.selectbox("Search mode", options=["hybrid", "keyword", "fuzzy", "semantic"], index=0)
     top_k = st.number_input("Top-k", min_value=1, max_value=50, value=10, step=1)
     if not query.strip():
         st.info("请输入搜索内容。")
@@ -93,7 +100,12 @@ def main() -> None:
         st.warning("还没有索引，请先建立索引。")
         return
 
-    results = search_index(query, top_k=int(top_k), config=DEFAULT_CONFIG, mode=mode)
+    try:
+        results = search_index(query, top_k=int(top_k), config=DEFAULT_CONFIG, mode=mode)
+    except EmbeddingError as exc:
+        st.error(f"Semantic search unavailable: {exc}")
+        st.info("请先启动 Ollama：ollama serve；如果模型不存在，请联网时提前运行：ollama pull bge-m3。")
+        return
     if not results:
         st.info(f"No results found. mode={mode}")
     for result in results:
