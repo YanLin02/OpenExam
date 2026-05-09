@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from openexam.ui_state import build_ask_signature, build_search_signature, preview_state_key
+from openexam.ui_state import build_ask_signature, build_search_signature, preview_state_key, preview_toggle_label
 
 
 def test_ask_signature_is_stable_and_sorted() -> None:
@@ -74,3 +74,8 @@ def test_preview_state_key_is_result_specific() -> None:
     assert first != second
     assert first != third
     assert "preview" in first
+
+
+def test_preview_toggle_label() -> None:
+    assert preview_toggle_label(False) == "预览该页"
+    assert preview_toggle_label(True) == "隐藏预览"

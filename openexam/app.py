@@ -13,7 +13,7 @@ from openexam.ingest import ingest_directory
 from openexam.ollama_utils import choose_default_llm_model, ensure_ollama_running, list_ollama_models
 from openexam.pdf_preview import PdfPreviewError, render_pdf_page
 from openexam.search import search_index
-from openexam.ui_state import build_ask_signature, build_search_signature, preview_state_key
+from openexam.ui_state import build_ask_signature, build_search_signature, preview_state_key, preview_toggle_label
 
 
 def format_location(result) -> str:
@@ -117,24 +117,34 @@ def clear_preview_state(prefix: str) -> None:
             st.session_state.pop(key, None)
 
 
+def rerun_app() -> None:
+    if hasattr(st, "rerun"):
+        st.rerun()
+    else:
+        st.experimental_rerun()
+
+
 def show_file_actions(path: str, page_number: int | None, key_prefix: str, chunk_db_id: int) -> None:
     target = Path(path)
     is_pdf_page = target.suffix.lower() == ".pdf" and page_number is not None
     if is_pdf_page:
         preview_key = preview_state_key(key_prefix, chunk_db_id, path, page_number)
-        if st.button("预览该页", key=f"{key_prefix}-preview"):
-            st.session_state[preview_key] = True
-        if st.session_state.get(preview_key):
-            if st.button("隐藏预览", key=f"{key_prefix}-hide-preview"):
+        preview_visible = bool(st.session_state.get(preview_key))
+        if st.button(preview_toggle_label(preview_visible), key=f"{key_prefix}-preview-toggle"):
+            if preview_visible:
                 st.session_state.pop(preview_key, None)
             else:
-                try:
-                    image = cached_pdf_page(str(target), target.stat().st_mtime, int(page_number), 1.5)
-                except (OSError, PdfPreviewError) as exc:
-                    st.error(str(exc))
-                else:
-                    st.caption(f"page {page_number}")
-                    st.image(image)
+                st.session_state[preview_key] = True
+            rerun_app()
+        preview_visible = bool(st.session_state.get(preview_key))
+        if preview_visible:
+            try:
+                image = cached_pdf_page(str(target), target.stat().st_mtime, int(page_number), 1.5)
+            except (OSError, PdfPreviewError) as exc:
+                st.error(str(exc))
+            else:
+                st.caption(f"page {page_number}")
+                st.image(image)
     col1, col2 = st.columns(2)
     if col1.button("打开文件", key=f"{key_prefix}-open"):
         ok, message = open_local_file(path)

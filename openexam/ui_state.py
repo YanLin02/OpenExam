@@ -52,3 +52,7 @@ def build_search_signature(
 
 def preview_state_key(prefix: str, chunk_db_id: int, source_path: str, page_number: int | None) -> str:
     return f"{prefix}:preview:{chunk_db_id}:{source_path}:{page_number}"
+
+
+def preview_toggle_label(is_visible: bool) -> str:
+    return "隐藏预览" if is_visible else "预览该页"
