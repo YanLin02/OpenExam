@@ -4,6 +4,7 @@ import argparse
 import sys
 from pathlib import Path
 
+from openexam.ask import LLMError, ask_question, render_ask_response
 from openexam.config import DEFAULT_CONFIG
 from openexam.db import connect, failed_documents, index_stats
 from openexam.embeddings import EmbeddingError, build_embeddings, embedding_status
@@ -75,6 +76,38 @@ def cmd_search(args: argparse.Namespace) -> int:
         )
         print(result.snippet)
         print(result.source_path)
+    return 0
+
+
+def cmd_ask(args: argparse.Namespace) -> int:
+    if not DEFAULT_CONFIG.db_path.exists():
+        print(f"Index not found: {DEFAULT_CONFIG.db_path}. Run ingest first.", file=sys.stderr)
+        return 2
+    if not args.question.strip():
+        print("Empty question. Please provide a question.", file=sys.stderr)
+        return 2
+    try:
+        response = ask_question(
+            args.question,
+            config=DEFAULT_CONFIG,
+            mode=args.mode,
+            scope=args.scope,
+            prefer=args.prefer,
+            per_file_cap=args.per_file_cap,
+            top_k=args.top_k,
+            llm_model=args.llm_model,
+        )
+    except EmbeddingError as exc:
+        print(f"Retrieval unavailable: {exc}", file=sys.stderr)
+        return 2
+    except LLMError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    print(
+        f"检索配置：mode={response.search_mode}, scope={response.scope}, prefer={response.prefer}, "
+        f"per_file_cap={response.per_file_cap}, top_k={response.top_k}, llm_model={response.llm_model}\n"
+    )
+    print(render_ask_response(response))
     return 0
 
 
@@ -167,6 +200,40 @@ def build_parser() -> argparse.ArgumentParser:
         help="Maximum results per file. 0 disables the cap.",
     )
     search_parser.set_defaults(func=cmd_search)
+
+    ask_parser = subparsers.add_parser("ask", help="Answer a question using local retrieval plus local Ollama LLM citations.")
+    ask_parser.add_argument("question", help="Question to answer from local indexed chunks.")
+    ask_parser.add_argument("--top-k", type=int, default=DEFAULT_CONFIG.llm_context_top_k, help="Number of retrieved chunks to pass to the local LLM.")
+    ask_parser.add_argument(
+        "--mode",
+        choices=("keyword", "fuzzy", "hybrid", "semantic"),
+        default="hybrid",
+        help="Retrieval mode used before asking the local LLM.",
+    )
+    ask_parser.add_argument(
+        "--scope",
+        choices=("all", "lecture", "textbook_ocr", "other"),
+        default="all",
+        help="Restrict retrieved context to a source type. Default: all.",
+    )
+    ask_parser.add_argument(
+        "--prefer",
+        choices=("none", "lecture", "textbook_ocr"),
+        default="lecture",
+        help="Lightly boost a source type during retrieval. Default: lecture.",
+    )
+    ask_parser.add_argument(
+        "--per-file-cap",
+        type=int,
+        default=2,
+        help="Maximum retrieved chunks per file. 0 disables the cap. Default: 2.",
+    )
+    ask_parser.add_argument(
+        "--llm-model",
+        default=DEFAULT_CONFIG.llm_model,
+        help="Local Ollama LLM model to use. Default: qwen3:8b.",
+    )
+    ask_parser.set_defaults(func=cmd_ask)
 
     status_parser = subparsers.add_parser("status", help="Show index statistics and recent failures.")
     status_parser.set_defaults(func=cmd_status)

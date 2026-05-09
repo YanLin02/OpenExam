@@ -23,6 +23,10 @@ class AppConfig:
     embedding_model: str = "bge-m3"
     ollama_base_url: str = "http://127.0.0.1:11434"
     embedding_batch_size: int = 16
+    llm_provider: str = "ollama"
+    llm_model: str = "qwen3:8b"
+    llm_timeout_seconds: float = 120.0
+    llm_context_top_k: int = 6
 
     @property
     def db_path(self) -> Path:

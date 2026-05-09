@@ -4,6 +4,7 @@ from pathlib import Path
 
 import streamlit as st
 
+from openexam.ask import LLMError, ask_question, format_evidence, format_source
 from openexam.config import DEFAULT_CONFIG
 from openexam.db import connect, failed_documents, index_stats
 from openexam.embeddings import EmbeddingError, embedding_status
@@ -94,17 +95,50 @@ def main() -> None:
     show_index_status()
 
     st.divider()
+    action = st.radio("Action", options=["Search", "Ask local AI"], horizontal=True)
     query = st.text_input("搜索", value="")
     mode = st.selectbox("Search mode", options=["hybrid", "keyword", "fuzzy", "semantic"], index=0)
     scope = st.selectbox("Scope", options=["all", "lecture", "textbook_ocr", "other"], index=0)
-    prefer = st.selectbox("Prefer", options=["none", "lecture", "textbook_ocr"], index=0)
-    per_file_cap = st.number_input("Per-file cap", min_value=0, max_value=20, value=0, step=1)
-    top_k = st.number_input("Top-k", min_value=1, max_value=50, value=10, step=1)
+    prefer_default = 1 if action == "Ask local AI" else 0
+    prefer = st.selectbox("Prefer", options=["none", "lecture", "textbook_ocr"], index=prefer_default)
+    cap_default = 2 if action == "Ask local AI" else 0
+    per_file_cap = st.number_input("Per-file cap", min_value=0, max_value=20, value=cap_default, step=1)
+    top_default = DEFAULT_CONFIG.llm_context_top_k if action == "Ask local AI" else 10
+    top_k = st.number_input("Top-k", min_value=1, max_value=50, value=top_default, step=1)
+    llm_model = st.text_input("LLM model", value=DEFAULT_CONFIG.llm_model)
     if not query.strip():
         st.info("请输入搜索内容。")
         return
     if not DEFAULT_CONFIG.db_path.exists():
         st.warning("还没有索引，请先建立索引。")
+        return
+
+    config_text = f"mode={mode}, scope={scope}, prefer={prefer}, per_file_cap={int(per_file_cap)}, top_k={int(top_k)}"
+    if action == "Ask local AI":
+        try:
+            response = ask_question(
+                query,
+                config=DEFAULT_CONFIG,
+                mode=mode,
+                scope=scope,
+                prefer=prefer,
+                per_file_cap=int(per_file_cap),
+                top_k=int(top_k),
+                llm_model=llm_model,
+            )
+        except (EmbeddingError, LLMError) as exc:
+            st.error(str(exc))
+            st.info("请确认 Ollama 已启动：ollama serve；如果模型不存在，请联网时提前运行：ollama pull qwen3:8b。")
+            return
+        st.caption(f"检索配置: {config_text}, llm_model={response.llm_model}")
+        st.subheader("LLM 回答")
+        st.write(response.answer)
+        st.subheader("依据片段")
+        for index, result in enumerate(response.results, start=1):
+            st.write(format_evidence(result, index))
+        st.subheader("来源列表")
+        for index, result in enumerate(response.results, start=1):
+            st.code(format_source(result, index), language="text")
         return
 
     try:
@@ -121,7 +155,7 @@ def main() -> None:
         st.error(f"Semantic search unavailable: {exc}")
         st.info("请先启动 Ollama：ollama serve；如果模型不存在，请联网时提前运行：ollama pull bge-m3。")
         return
-    st.caption(f"Search config: mode={mode}, scope={scope}, prefer={prefer}, per_file_cap={int(per_file_cap)}, top_k={int(top_k)}")
+    st.caption(f"Search config: {config_text}")
     if not results:
         st.info(f"No results found. mode={mode}")
     for result in results:

@@ -136,6 +136,51 @@ Notes:
 - If chunks, text hashes, or embedding model change, rerun `python -m openexam embed`.
 - `hybrid` falls back to keyword/fuzzy search if the semantic index is missing or stale.
 
+## Local Cited Q&A
+
+OpenExam can ask a local Ollama LLM to answer using only retrieved chunks. It does not let the LLM read files directly, and it does not call cloud APIs.
+
+Default LLM settings:
+
+- provider: `ollama`
+- model: `qwen3:8b`
+- base URL: `http://127.0.0.1:11434`
+
+Prepare the model while online:
+
+```bash
+ollama pull qwen3:8b
+```
+
+Run cited Q&A:
+
+```bash
+python -m openexam ask "Transformer 中注意力机制的作用" --mode hybrid --prefer lecture --per-file-cap 2 --top-k 6
+```
+
+`ask` first runs the normal search pipeline, then passes only the returned chunks to the local LLM. The output contains:
+
+1. `回答`
+2. `依据`
+3. `来源`
+
+Each source includes file name, page/slide/paragraph, source type, and full path.
+
+Useful options:
+
+```bash
+python -m openexam ask "为什么正则化可以缓解过拟合" --mode hybrid --prefer lecture --per-file-cap 2 --top-k 6
+python -m openexam ask "卷积神经网络的局部连接和权值共享是什么意思" --mode hybrid --scope lecture --top-k 6
+python -m openexam ask "生成对抗网络的训练目标是什么" --mode hybrid --prefer lecture --per-file-cap 2 --top-k 6
+```
+
+Error handling:
+
+- If no search results are found, OpenExam does not call the LLM and prints `本地资料中未找到充分依据。`
+- If Ollama is not running, it prints `Ollama is not reachable. Start it with: ollama serve`.
+- If `qwen3:8b` is missing, pull it while online: `ollama pull qwen3:8b`.
+- If semantic index is missing and `ask --mode semantic` is requested, `ask` falls back to `hybrid`.
+
 ## Streamlit UI
 
 Start the local UI on localhost:
@@ -194,13 +239,20 @@ Use this checklist before the exam, while network access is still available:
    python -m openexam search "Transformer 中注意力机制的作用" --top-k 3 --mode semantic
    ```
 
-7. Start the local UI once and confirm it loads:
+7. If local cited Q&A is needed, prepare and test the LLM:
+
+   ```bash
+   ollama pull qwen3:8b
+   python -m openexam ask "Transformer 中注意力机制的作用" --mode hybrid --prefer lecture --per-file-cap 2 --top-k 6
+   ```
+
+8. Start the local UI once and confirm it loads:
 
    ```bash
    streamlit run openexam/app.py --server.address 127.0.0.1
    ```
 
-8. Disconnect from the network and repeat one CLI search against the existing index.
+9. Disconnect from the network and repeat one CLI search or ask command against the existing index.
 
 ## Offline Usage
 
@@ -235,6 +287,7 @@ python3 -m openexam search "卷积神经网络" --top-k 5 --mode hybrid
 python3 -m openexam search "Transformer 中注意力机制的作用" --top-k 5 --mode semantic
 python3 -m openexam search "Transformer 中注意力机制的作用" --mode hybrid --scope lecture --top-k 5
 python3 -m openexam search "为什么正则化可以缓解过拟合" --mode hybrid --prefer lecture --per-file-cap 2 --top-k 5
+python3 -m openexam ask "Transformer 中注意力机制的作用" --mode hybrid --prefer lecture --per-file-cap 2 --top-k 6
 python3 -m pytest
 streamlit run openexam/app.py --server.address 127.0.0.1
 ```
@@ -250,8 +303,10 @@ Expected behavior:
 - OCR is not implemented. Scanned PDFs without embedded text cannot be searched.
 - Chinese search uses SQLite FTS5 plus substring and rapidfuzz fallback; it is not a full Chinese word-segmentation engine.
 - Semantic search requires a local Ollama service and a pre-pulled `bge-m3` model.
-- The MVP does not include FAISS, Chroma, local LLM Q&A, cloud APIs, or automatic model downloads.
+- Local cited Q&A requires a local Ollama service and a pre-pulled `qwen3:8b` model.
+- The MVP does not include FAISS, Chroma, OCR, cloud APIs, or automatic model downloads.
 - Search quality depends on the quality of text extracted from the source file.
+- LLM answers are constrained by retrieved chunks; if retrieval misses the relevant page, Q&A quality will suffer.
 
 ## Development Tests
 
