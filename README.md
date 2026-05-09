@@ -217,6 +217,16 @@ The UI provides:
 
 Browser `file://` links are not used as the primary open mechanism because browsers may block local-file navigation from a localhost page. PDF page preview inside Streamlit is the most reliable way to inspect the referenced page.
 
+### 并行搜索 / 后台提问
+
+The Streamlit UI also includes `Parallel Search` and `Parallel Ask` actions:
+
+- `Parallel Search` accepts one query per line and is useful for checking several terms at once.
+- `Parallel Ask` accepts one question per line and runs questions in the background.
+- Ask tasks use one worker by default so a local LLM such as `qwen3:8b` does not compete with itself for resources.
+- If the machine has enough CPU/GPU memory, set `Ask workers` to `2` before submitting new ask tasks.
+- Tasks are kept only in the current Streamlit session and are not persisted to disk or the index database.
+
 ## Privacy and Offline Use
 
 - OpenExam stores indexes and generated local artifacts under `.openexam/`.

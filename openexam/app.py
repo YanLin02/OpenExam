@@ -1,6 +1,11 @@
 from __future__ import annotations
 
+import sys
 from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 import streamlit as st
 
@@ -17,6 +22,16 @@ from openexam.db import connect, failed_documents, index_stats
 from openexam.embeddings import EmbeddingError, embedding_status
 from openexam.file_utils import open_local_file, reveal_local_file
 from openexam.ingest import ingest_directory
+from openexam.jobs import (
+    JobRecord,
+    SearchJobResult,
+    create_ask_executor,
+    create_search_executor,
+    job_elapsed_seconds,
+    submit_ask_job,
+    submit_search_job,
+    update_job_from_future,
+)
 from openexam.models import SearchResult
 from openexam.ollama_utils import choose_default_llm_model, ensure_ollama_running, list_ollama_models
 from openexam.pdf_preview import PdfPreviewError, render_pdf_page
@@ -166,9 +181,21 @@ def cached_pdf_page(path: str, mtime: float, page_number: int, zoom: float) -> b
     return render_pdf_page(path, page_number, zoom=zoom)
 
 
+@st.cache_resource(show_spinner=False)
+def get_search_executor(max_workers: int = 4):
+    return create_search_executor(max_workers=max_workers)
+
+
+@st.cache_resource(show_spinner=False)
+def get_ask_executor(max_workers: int = 1):
+    return create_ask_executor(max_workers=max_workers)
+
+
 def clear_preview_state(prefix: str) -> None:
     for key in list(st.session_state.keys()):
-        if isinstance(key, str) and key.startswith(f"{prefix}:preview:"):
+        if isinstance(key, str) and (
+            key.startswith(f"{prefix}:preview:") or (key.startswith(f"{prefix}-") and ":preview:" in key)
+        ):
             st.session_state.pop(key, None)
 
 
@@ -226,7 +253,8 @@ def render_path_expander(path: str, key_prefix: str) -> None:
         st.caption(path)
 
 
-def render_search_result_card(result: SearchResult, index: int) -> None:
+def render_search_result_card(result: SearchResult, index: int, key_prefix: str = "search") -> None:
+    card_key = f"{key_prefix}-{result.chunk_db_id}"
     with st.container(border=True):
         st.markdown(f"**{index}. {result.file_name}**")
         st.caption(
@@ -234,8 +262,8 @@ def render_search_result_card(result: SearchResult, index: int) -> None:
             f"{result.mode} | {result.match_type}"
         )
         st.write(result.snippet)
-        render_path_expander(result.source_path, f"search-path-{result.chunk_db_id}")
-        render_file_actions(result.source_path, result.page_number, f"search-{result.chunk_db_id}", result.chunk_db_id)
+        render_path_expander(result.source_path, f"{card_key}-path")
+        render_file_actions(result.source_path, result.page_number, card_key, result.chunk_db_id)
 
 
 def ask_answer_text(response) -> str:
@@ -274,7 +302,7 @@ def render_ask_summary(response, stale: bool = False) -> None:
     st.markdown(ask_answer_text(response).replace("\n", "  \n"))
 
 
-def render_ask_details(response) -> None:
+def render_ask_details(response, key_prefix: str = "ask") -> None:
     with st.expander("依据片段", expanded=False):
         if response.results:
             for index, result in enumerate(response.results, start=1):
@@ -284,36 +312,55 @@ def render_ask_details(response) -> None:
     with st.expander("来源列表", expanded=True):
         if response.results:
             for index, result in enumerate(response.results, start=1):
-                render_source_card(result, index, "ask")
+                render_source_card(result, index, key_prefix)
         else:
             st.write("无本地来源")
 
 
-def render_controls() -> tuple[str, str, str, int, str, int, str, str, str, str, bool, bool]:
+def render_controls() -> tuple[str, str, str, int, str, int, str, str, str, str, bool, bool, bool, int]:
     top_cols = st.columns([2, 2, 2, 1])
-    action = top_cols[0].radio("Action", options=["Search", "Ask local AI"], horizontal=True)
+    action = top_cols[0].radio("Action", options=["Search", "Ask local AI", "Parallel Search", "Parallel Ask"], horizontal=True)
+    is_ask = action in {"Ask local AI", "Parallel Ask"}
+    is_parallel = action in {"Parallel Search", "Parallel Ask"}
     mode = top_cols[1].selectbox("Mode", options=["hybrid", "keyword", "fuzzy", "semantic"], index=0)
     scope = top_cols[2].selectbox("Scope", options=["all", "lecture", "textbook_ocr", "other"], index=0)
-    top_default = DEFAULT_CONFIG.llm_context_top_k if action == "Ask local AI" else 10
+    top_default = DEFAULT_CONFIG.llm_context_top_k if is_ask else 10
     top_k = top_cols[3].number_input("Top-k", min_value=1, max_value=50, value=top_default, step=1)
 
-    query_cols = st.columns([8, 1, 1])
-    query = query_cols[0].text_input("搜索 / 问题", value="", label_visibility="collapsed", placeholder="输入关键词、术语或问题")
-    search_clicked = query_cols[1].button("搜索", type="primary", use_container_width=True)
-    clear_clicked = query_cols[2].button("清除", use_container_width=True)
+    refresh_clicked = False
+    if is_parallel:
+        submit_label = "提交搜索任务" if action == "Parallel Search" else "提交提问任务"
+        clear_label = "清除搜索任务" if action == "Parallel Search" else "清除提问任务"
+        query_cols = st.columns([7, 1.4, 1.4, 1.4])
+        query = query_cols[0].text_area(
+            "批量输入",
+            value="",
+            label_visibility="collapsed",
+            placeholder="每行一个关键词、术语或问题",
+            height=120,
+        )
+        search_clicked = query_cols[1].button(submit_label, type="primary", use_container_width=True)
+        refresh_clicked = query_cols[2].button("刷新任务状态", use_container_width=True)
+        clear_clicked = query_cols[3].button(clear_label, use_container_width=True)
+    else:
+        query_cols = st.columns([8, 1, 1])
+        query = query_cols[0].text_input("搜索 / 问题", value="", label_visibility="collapsed", placeholder="输入关键词、术语或问题")
+        search_clicked = query_cols[1].button("搜索", type="primary", use_container_width=True)
+        clear_clicked = query_cols[2].button("清除", use_container_width=True)
 
-    if action == "Ask local AI":
-        param_cols = st.columns([2, 1, 2, 2, 3])
+    ask_workers = 1
+    if is_ask:
+        param_cols = st.columns([2, 1, 2, 2, 3, 1] if action == "Parallel Ask" else [2, 1, 2, 2, 3])
     else:
         param_cols = st.columns([2, 1])
-    prefer = param_cols[0].selectbox("Prefer", options=["none", "lecture", "textbook_ocr"], index=1 if action == "Ask local AI" else 0)
-    cap_default = 2 if action == "Ask local AI" else 0
+    prefer = param_cols[0].selectbox("Prefer", options=["none", "lecture", "textbook_ocr"], index=1 if is_ask else 0)
+    cap_default = 2 if is_ask else 0
     per_file_cap = param_cols[1].number_input("Per-file cap", min_value=0, max_value=20, value=cap_default, step=1)
 
     evidence_policy = "warn"
     detail = "standard"
     llm_model = DEFAULT_CONFIG.llm_model
-    if action == "Ask local AI":
+    if is_ask:
         evidence_policy = param_cols[2].selectbox("Evidence", options=["warn", "strict", "open"], index=0)
         detail_label = param_cols[3].selectbox("Detail", options=["简洁", "标准", "详细"], index=1)
         detail = {"简洁": "concise", "标准": "standard", "详细": "detailed"}[detail_label]
@@ -324,7 +371,24 @@ def render_controls() -> tuple[str, str, str, int, str, int, str, str, str, str,
         else:
             model_index = models.index(selected_llm) if selected_llm in models else 0
             llm_model = param_cols[4].selectbox("LLM model", options=models, index=model_index)
-    return action, query, mode, int(top_k), scope, int(per_file_cap), prefer, evidence_policy, detail, llm_model, search_clicked, clear_clicked
+        if action == "Parallel Ask":
+            ask_workers = int(param_cols[5].selectbox("Ask workers", options=[1, 2], index=0))
+    return (
+        action,
+        query,
+        mode,
+        int(top_k),
+        scope,
+        int(per_file_cap),
+        prefer,
+        evidence_policy,
+        detail,
+        llm_model,
+        search_clicked,
+        refresh_clicked,
+        clear_clicked,
+        ask_workers,
+    )
 
 
 def main() -> None:
@@ -332,12 +396,244 @@ def main() -> None:
     render_sidebar()
 
     st.markdown("# OpenExam")
-    action, query, mode, top_k, scope, per_file_cap, prefer, evidence_policy, detail, llm_model, search_clicked, clear_clicked = render_controls()
+    (
+        action,
+        query,
+        mode,
+        top_k,
+        scope,
+        per_file_cap,
+        prefer,
+        evidence_policy,
+        detail,
+        llm_model,
+        search_clicked,
+        refresh_clicked,
+        clear_clicked,
+        ask_workers,
+    ) = render_controls()
 
     if action == "Ask local AI":
         handle_ask(query, mode, scope, prefer, per_file_cap, top_k, llm_model, evidence_policy, detail, search_clicked, clear_clicked)
-    else:
+    elif action == "Search":
         handle_search(query, mode, scope, prefer, per_file_cap, top_k, search_clicked, clear_clicked)
+    elif action == "Parallel Ask":
+        handle_parallel_ask(
+            query,
+            mode,
+            scope,
+            prefer,
+            per_file_cap,
+            top_k,
+            llm_model,
+            evidence_policy,
+            detail,
+            ask_workers,
+            search_clicked,
+            refresh_clicked,
+            clear_clicked,
+        )
+    else:
+        handle_parallel_search(query, mode, scope, prefer, per_file_cap, top_k, search_clicked, refresh_clicked, clear_clicked)
+
+
+def batch_inputs(text: str) -> list[str]:
+    return [line.strip() for line in text.splitlines() if line.strip()]
+
+
+def session_jobs(key: str) -> list[JobRecord]:
+    if key not in st.session_state:
+        st.session_state[key] = []
+    return st.session_state[key]
+
+
+def update_jobs(jobs: list[JobRecord]) -> None:
+    for job in jobs:
+        update_job_from_future(job)
+
+
+def render_job_header(job: JobRecord, index: int) -> None:
+    st.markdown(f"**{index}. {job.input_text}**")
+    st.caption(f"status={job.status} | elapsed {job_elapsed_seconds(job):.1f}s")
+
+
+def render_parallel_search_job(job: JobRecord, index: int) -> None:
+    with st.container(border=True):
+        render_job_header(job, index)
+        if job.status == "error":
+            st.error(job.error or "Search job failed.")
+            return
+        if job.status != "done":
+            return
+        if not isinstance(job.result, SearchJobResult):
+            st.error("Search job returned an unexpected result.")
+            return
+
+        result = job.result
+        st.caption(
+            f"total {result.timing.get('total_time_ms', 0.0):.1f} ms | "
+            f"retrieval {result.timing.get('retrieval_time_ms', 0.0):.1f} ms | "
+            f"semantic {result.timing.get('semantic_time_ms', 0.0):.1f} ms | "
+            f"ranking {result.timing.get('ranking_time_ms', 0.0):.1f} ms"
+        )
+        if not result.results:
+            st.info("No results found.")
+            return
+        for result_index, search_result in enumerate(result.results, start=1):
+            render_search_result_card(search_result, result_index, key_prefix=f"parallel-search-{job.job_id}")
+
+
+def render_parallel_ask_job(job: JobRecord, index: int) -> None:
+    with st.container(border=True):
+        render_job_header(job, index)
+        if job.status == "error":
+            st.error(job.error or "Ask job failed.")
+            return
+        if job.status != "done":
+            return
+        if job.result is None:
+            st.error("Ask job returned an empty result.")
+            return
+
+        render_ask_summary(job.result)
+        render_ask_details(job.result, key_prefix=f"parallel-ask-{job.job_id}")
+
+
+def handle_parallel_search(
+    query_text: str,
+    mode: str,
+    scope: str,
+    prefer: str,
+    per_file_cap: int,
+    top_k: int,
+    submit_clicked: bool,
+    refresh_clicked: bool,
+    clear_clicked: bool,
+) -> None:
+    jobs = session_jobs("search_jobs")
+    update_jobs(jobs)
+
+    if clear_clicked:
+        st.session_state["search_jobs"] = []
+        clear_preview_state("parallel-search")
+        st.info("已清除搜索任务。")
+        return
+
+    if submit_clicked:
+        queries = batch_inputs(query_text)
+        if not queries:
+            st.warning("请输入至少一行搜索内容。")
+            return
+        if not DEFAULT_CONFIG.db_path.exists():
+            st.warning("还没有索引，请先建立索引。")
+            return
+
+        executor = get_search_executor(max_workers=4)
+        for query in queries:
+            signature = build_search_signature(
+                query=query,
+                mode=mode,
+                scope=scope,
+                prefer=prefer,
+                per_file_cap=per_file_cap,
+                top_k=top_k,
+            )
+            jobs.append(
+                submit_search_job(
+                    executor,
+                    query,
+                    signature=signature,
+                    config=DEFAULT_CONFIG,
+                    mode=mode,
+                    scope=scope,
+                    prefer=prefer,
+                    per_file_cap=per_file_cap,
+                    top_k=top_k,
+                )
+            )
+        st.success(f"已提交 {len(queries)} 个搜索任务。")
+
+    if refresh_clicked:
+        st.info("任务状态已刷新。")
+    if not jobs:
+        st.info("提交批量搜索任务后，结果会按任务独立显示。")
+        return
+    for index, job in enumerate(jobs, start=1):
+        render_parallel_search_job(job, index)
+
+
+def handle_parallel_ask(
+    query_text: str,
+    mode: str,
+    scope: str,
+    prefer: str,
+    per_file_cap: int,
+    top_k: int,
+    llm_model: str,
+    evidence_policy: str,
+    detail: str,
+    ask_workers: int,
+    submit_clicked: bool,
+    refresh_clicked: bool,
+    clear_clicked: bool,
+) -> None:
+    jobs = session_jobs("ask_jobs")
+    update_jobs(jobs)
+
+    if clear_clicked:
+        st.session_state["ask_jobs"] = []
+        clear_preview_state("parallel-ask")
+        st.info("已清除提问任务。")
+        return
+
+    if submit_clicked:
+        questions = batch_inputs(query_text)
+        if not questions:
+            st.warning("请输入至少一行问题。")
+            return
+        if not DEFAULT_CONFIG.db_path.exists():
+            st.warning("还没有索引，请先建立索引。")
+            return
+
+        executor = get_ask_executor(max_workers=ask_workers)
+        for question in questions:
+            signature = build_ask_signature(
+                query=question,
+                mode=mode,
+                scope=scope,
+                prefer=prefer,
+                per_file_cap=per_file_cap,
+                top_k=top_k,
+                llm_model=llm_model,
+                evidence_policy=evidence_policy,
+                detail=detail,
+            )
+            jobs.append(
+                submit_ask_job(
+                    executor,
+                    question,
+                    signature=signature,
+                    config=DEFAULT_CONFIG,
+                    mode=mode,
+                    scope=scope,
+                    prefer=prefer,
+                    per_file_cap=per_file_cap,
+                    top_k=top_k,
+                    llm_model=llm_model,
+                    evidence_policy=evidence_policy,
+                    detail=detail,
+                )
+            )
+        st.success(f"已提交 {len(questions)} 个提问任务。")
+
+    if refresh_clicked:
+        st.info("任务状态已刷新。")
+    if not jobs:
+        st.info("提交批量提问任务后，默认按单 worker 排队执行。")
+        return
+    st.caption(f"Ask workers for newly submitted tasks: {ask_workers}")
+    for index, job in enumerate(jobs, start=1):
+        render_parallel_ask_job(job, index)
 
 
 def handle_ask(
