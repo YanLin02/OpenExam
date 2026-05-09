@@ -1,6 +1,14 @@
 from __future__ import annotations
 
-from openexam.ui_state import build_ask_signature, build_search_signature, preview_state_key, preview_toggle_label
+from openexam.ui_state import (
+    build_ask_signature,
+    build_search_signature,
+    compact_index_status,
+    compact_ollama_status,
+    compact_source_status,
+    preview_state_key,
+    preview_toggle_label,
+)
 
 
 def test_ask_signature_is_stable_and_sorted() -> None:
@@ -79,3 +87,10 @@ def test_preview_state_key_is_result_specific() -> None:
 def test_preview_toggle_label() -> None:
     assert preview_toggle_label(False) == "预览该页"
     assert preview_toggle_label(True) == "隐藏预览"
+
+
+def test_compact_status_text() -> None:
+    assert compact_index_status(True, 11, 1379, True, 1379) == "Index: ready | docs 11 | chunks 1379 | semantic ready | embeddings 1379"
+    assert compact_source_status(10, 1, 0) == "Source: lecture 10 | textbook_ocr 1 | other 0"
+    assert compact_ollama_status(True, ["bge-m3", "qwen3:8b"]) == "Ollama: running | Models: bge-m3, qwen3:8b"
+    assert compact_ollama_status(False, []) == "Ollama: not reachable"

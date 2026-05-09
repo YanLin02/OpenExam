@@ -56,3 +56,20 @@ def preview_state_key(prefix: str, chunk_db_id: int, source_path: str, page_numb
 
 def preview_toggle_label(is_visible: bool) -> str:
     return "隐藏预览" if is_visible else "预览该页"
+
+
+def compact_index_status(index_exists: bool, documents: int, chunks: int, semantic_ready: bool, embeddings: int) -> str:
+    index_label = "ready" if index_exists else "missing"
+    semantic_label = "ready" if semantic_ready else "missing"
+    return f"Index: {index_label} | docs {documents} | chunks {chunks} | semantic {semantic_label} | embeddings {embeddings}"
+
+
+def compact_source_status(lecture: int, textbook_ocr: int, other: int) -> str:
+    return f"Source: lecture {lecture} | textbook_ocr {textbook_ocr} | other {other}"
+
+
+def compact_ollama_status(reachable: bool, models: list[str]) -> str:
+    status = "running" if reachable else "not reachable"
+    if not models:
+        return f"Ollama: {status}"
+    return f"Ollama: {status} | Models: {', '.join(models)}"
