@@ -75,6 +75,7 @@ Result control options:
 - `--prefer none|lecture|textbook_ocr`: lightly boost a source type without filtering. Default: `none`.
 - `--per-file-cap N`: limit repeated results from the same file. `0` disables the cap.
 - `--open-first`: open the top result file with macOS `open`.
+- `--open-first-method default|chrome`: choose how `--open-first` opens PDFs. `chrome` tries Google Chrome with `file://...#page=N`; if no page number exists, it falls back to normal open.
 - `--auto-start-ollama` / `--no-auto-start-ollama`: control whether semantic search tries to start local Ollama with `ollama serve`. Auto-start is enabled by default.
 
 Source types are inferred from file names:
@@ -244,8 +245,15 @@ The UI includes:
 - Ollama status panel, model list, refresh button, and start button.
 - Local LLM model dropdown. It prefers `qwen3:8b`; if missing, it chooses the first non-embedding local model.
 - Timing display for retrieval, semantic search, ranking, LLM generation, and total time.
-- Open file buttons and local file URI display. For PDFs, OpenExam tries `file:///path/to/file.pdf#page=N`; PDF reader support for `#page` varies.
+- PDF page preview inside Streamlit for PDF results with page numbers.
+- Open file, Finder reveal, and Chrome page-open buttons. Buttons launch macOS `open` in the background so the UI does not wait for the PDF reader.
 - Clear message when the index is missing or no result is found.
+
+## 为什么不直接点击 file:// 链接？
+
+OpenExam runs Streamlit at `http://127.0.0.1`. Many browsers block `file://` links opened from an HTTP page for security reasons, so clickable local file links are unreliable. macOS Preview also does not consistently honor `#page=N` fragments for PDFs.
+
+For reliable exam use, prefer `预览该页` in the Streamlit result card. It renders the matched PDF page directly with PyMuPDF and caches the image by path, file mtime, page number, and zoom. `打开文件` and `用 Chrome 打开到该页` remain auxiliary options; Chrome page jumping depends on the local browser/PDF handling setup.
 
 ## 考试前检查清单
 

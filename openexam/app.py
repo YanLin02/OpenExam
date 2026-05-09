@@ -8,10 +8,12 @@ from openexam.ask import LLMError, ask_question, format_evidence, format_source,
 from openexam.config import DEFAULT_CONFIG
 from openexam.db import connect, failed_documents, index_stats
 from openexam.embeddings import EmbeddingError, embedding_status
-from openexam.file_utils import file_uri, open_local_file
+from openexam.file_utils import open_local_file, open_pdf_page_in_chrome, reveal_local_file
 from openexam.ingest import ingest_directory
 from openexam.ollama_utils import choose_default_llm_model, ensure_ollama_running, list_ollama_models
+from openexam.pdf_preview import PdfPreviewError, render_pdf_page
 from openexam.search import search_index
+from openexam.ui_state import build_ask_signature
 
 
 def format_location(result) -> str:
@@ -104,6 +106,77 @@ def llm_model_options() -> tuple[list[str], str | None]:
     return models, selected
 
 
+@st.cache_data(show_spinner=False)
+def cached_pdf_page(path: str, mtime: float, page_number: int, zoom: float) -> bytes:
+    return render_pdf_page(path, page_number, zoom=zoom)
+
+
+def show_file_actions(path: str, page_number: int | None, key_prefix: str) -> None:
+    target = Path(path)
+    is_pdf_page = target.suffix.lower() == ".pdf" and page_number is not None
+    if is_pdf_page:
+        if st.button("预览该页", key=f"{key_prefix}-preview"):
+            try:
+                image = cached_pdf_page(str(target), target.stat().st_mtime, int(page_number), 1.5)
+            except (OSError, PdfPreviewError) as exc:
+                st.error(str(exc))
+            else:
+                st.caption(f"page {page_number}")
+                st.image(image)
+    col1, col2, col3 = st.columns(3)
+    if col1.button("打开文件", key=f"{key_prefix}-open"):
+        ok, message = open_local_file(path)
+        if ok:
+            st.success(message)
+        else:
+            st.error(message)
+    if col2.button("在 Finder 中显示", key=f"{key_prefix}-reveal"):
+        ok, message = reveal_local_file(path)
+        if ok:
+            st.success(message)
+        else:
+            st.error(message)
+    if is_pdf_page and col3.button("用 Chrome 打开到该页", key=f"{key_prefix}-chrome"):
+        ok, message = open_pdf_page_in_chrome(path, page_number)
+        if ok:
+            st.success(message)
+        else:
+            st.error(message)
+
+
+def render_ask_response_block(response, stale: bool = False) -> None:
+    if stale:
+        st.warning("参数已改变，请重新点击生成回答。下面显示的是旧结果。")
+    response_config_text = (
+        f"mode={response.search_mode}, scope={response.scope}, prefer={response.prefer}, "
+        f"per_file_cap={response.per_file_cap}, top_k={response.top_k}"
+    )
+    st.caption(
+        f"检索配置: {response_config_text}, llm_model={response.llm_model}, "
+        f"evidence_policy={response.evidence_policy}, evidence_status={response.evidence_status}, detail={response.detail}"
+    )
+    st.caption(
+        f"耗时: 检索 {response.timing.get('retrieval_time_ms', 0.0):.1f} ms, "
+        f"LLM {response.timing.get('llm_time_ms', 0.0):.1f} ms, "
+        f"总计 {response.timing.get('total_time_ms', 0.0):.1f} ms"
+    )
+    st.subheader("LLM 回答")
+    st.markdown(render_ask_response(response).replace("\n", "  \n"))
+    st.subheader("依据片段")
+    if response.results:
+        for index, result in enumerate(response.results, start=1):
+            st.write(format_evidence(result, index))
+    else:
+        st.write("无本地依据")
+    st.subheader("来源列表")
+    if response.results:
+        for index, result in enumerate(response.results, start=1):
+            st.code(format_source(result, index), language="text")
+            show_file_actions(result.source_path, result.page_number, f"ask-{index}-{result.chunk_db_id}")
+    else:
+        st.code("无本地来源", language="text")
+
+
 def main() -> None:
     st.set_page_config(page_title="OpenExam", layout="wide")
     st.title("OpenExam")
@@ -170,54 +243,52 @@ def main() -> None:
 
     config_text = f"mode={mode}, scope={scope}, prefer={prefer}, per_file_cap={int(per_file_cap)}, top_k={int(top_k)}"
     if action == "Ask local AI":
-        try:
-            response = ask_question(
-                query,
-                config=DEFAULT_CONFIG,
-                mode=mode,
-                scope=scope,
-                prefer=prefer,
-                per_file_cap=int(per_file_cap),
-                top_k=int(top_k),
-                llm_model=llm_model,
-                evidence_policy=evidence_policy,
-                detail=detail,
-            )
-        except (EmbeddingError, LLMError) as exc:
-            st.error(str(exc))
-            st.info("请确认 Ollama 已启动：ollama serve；如果模型不存在，请联网时提前运行：ollama pull qwen3:8b。")
+        ask_signature = build_ask_signature(
+            query=query,
+            mode=mode,
+            scope=scope,
+            prefer=prefer,
+            per_file_cap=int(per_file_cap),
+            top_k=int(top_k),
+            llm_model=llm_model,
+            evidence_policy=evidence_policy,
+            detail=detail,
+        )
+        col1, col2 = st.columns(2)
+        generate_clicked = col1.button("生成回答", type="primary")
+        clear_clicked = col2.button("清除回答")
+        if clear_clicked:
+            st.session_state.pop("last_ask_signature", None)
+            st.session_state.pop("last_ask_response", None)
+            st.info("已清除回答。")
             return
-        st.caption(
-            f"检索配置: {config_text}, llm_model={response.llm_model}, "
-            f"evidence_policy={response.evidence_policy}, evidence_status={response.evidence_status}, detail={response.detail}"
-        )
-        st.caption(
-            f"耗时: 检索 {response.timing.get('retrieval_time_ms', 0.0):.1f} ms, "
-            f"LLM {response.timing.get('llm_time_ms', 0.0):.1f} ms, "
-            f"总计 {response.timing.get('total_time_ms', 0.0):.1f} ms"
-        )
-        st.subheader("LLM 回答")
-        st.markdown(render_ask_response(response).replace("\n", "  \n"))
-        st.subheader("依据片段")
-        if response.results:
-            for index, result in enumerate(response.results, start=1):
-                st.write(format_evidence(result, index))
-        else:
-            st.write("无本地依据")
-        st.subheader("来源列表")
-        if response.results:
-            for index, result in enumerate(response.results, start=1):
-                st.code(format_source(result, index), language="text")
-                if result.page_number is not None:
-                    st.caption(file_uri(result.source_path, result.page_number))
-                if st.button("打开文件", key=f"ask-open-{index}-{result.chunk_db_id}"):
-                    ok, message = open_local_file(result.source_path)
-                    if ok:
-                        st.success(message)
-                    else:
-                        st.error(message)
-        else:
-            st.code("无本地来源", language="text")
+        if generate_clicked:
+            try:
+                response = ask_question(
+                    query,
+                    config=DEFAULT_CONFIG,
+                    mode=mode,
+                    scope=scope,
+                    prefer=prefer,
+                    per_file_cap=int(per_file_cap),
+                    top_k=int(top_k),
+                    llm_model=llm_model,
+                    evidence_policy=evidence_policy,
+                    detail=detail,
+                )
+            except (EmbeddingError, LLMError) as exc:
+                st.error(str(exc))
+                st.info("请确认 Ollama 已启动：ollama serve；如果模型不存在，请联网时提前运行：ollama pull qwen3:8b。")
+                return
+            st.session_state["last_ask_signature"] = ask_signature
+            st.session_state["last_ask_response"] = response
+
+        response = st.session_state.get("last_ask_response")
+        if response is None:
+            st.info("点击“生成回答”后才会调用本地 LLM。")
+            return
+        stale = st.session_state.get("last_ask_signature") != ask_signature
+        render_ask_response_block(response, stale=stale)
         return
 
     try:
@@ -254,14 +325,7 @@ def main() -> None:
             )
             st.write(result.snippet)
             st.code(result.source_path, language="text")
-            if result.page_number is not None:
-                st.caption(file_uri(result.source_path, result.page_number))
-            if st.button("打开文件", key=f"search-open-{result.chunk_db_id}"):
-                ok, message = open_local_file(result.source_path)
-                if ok:
-                    st.success(message)
-                else:
-                    st.error(message)
+            show_file_actions(result.source_path, result.page_number, f"search-{result.chunk_db_id}")
 
 
 if __name__ == "__main__":
