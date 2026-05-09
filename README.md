@@ -246,14 +246,15 @@ The UI includes:
 - Local LLM model dropdown. It prefers `qwen3:8b`; if missing, it chooses the first non-embedding local model.
 - Timing display for retrieval, semantic search, ranking, LLM generation, and total time.
 - PDF page preview inside Streamlit for PDF results with page numbers.
-- Open file, Finder reveal, and Chrome page-open buttons. Buttons launch macOS `open` in the background so the UI does not wait for the PDF reader.
+- Open file and Finder reveal buttons. Buttons launch macOS `open` in the background so the UI does not wait for the PDF reader.
+- Search and Ask both use explicit `搜索` / `清除` buttons. File action buttons reuse saved results and do not rerun search or LLM generation.
 - Clear message when the index is missing or no result is found.
 
 ## 为什么不直接点击 file:// 链接？
 
 OpenExam runs Streamlit at `http://127.0.0.1`. Many browsers block `file://` links opened from an HTTP page for security reasons, so clickable local file links are unreliable. macOS Preview also does not consistently honor `#page=N` fragments for PDFs.
 
-For reliable exam use, prefer `预览该页` in the Streamlit result card. It renders the matched PDF page directly with PyMuPDF and caches the image by path, file mtime, page number, and zoom. `打开文件` and `用 Chrome 打开到该页` remain auxiliary options; Chrome page jumping depends on the local browser/PDF handling setup.
+For reliable exam use, prefer `预览该页` in the Streamlit result card. It renders the matched PDF page directly with PyMuPDF and caches the image by path, file mtime, page number, and zoom. `打开文件` remains an auxiliary option for opening the full PDF externally.
 
 ## 考试前检查清单
 

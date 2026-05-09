@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from openexam.ui_state import build_ask_signature
+from openexam.ui_state import build_ask_signature, build_search_signature, preview_state_key
 
 
 def test_ask_signature_is_stable_and_sorted() -> None:
@@ -56,3 +56,21 @@ def test_ask_signature_changes_when_parameters_change() -> None:
     )
 
     assert base != changed
+
+
+def test_search_signature_changes_when_parameters_change() -> None:
+    base = build_search_signature(query="q", mode="hybrid", scope="all", prefer="none", per_file_cap=0, top_k=10)
+    changed = build_search_signature(query="q", mode="keyword", scope="all", prefer="none", per_file_cap=0, top_k=10)
+
+    assert base != changed
+    assert build_search_signature(query="q", mode="hybrid", scope="all", prefer="none", per_file_cap=0, top_k=10) == base
+
+
+def test_preview_state_key_is_result_specific() -> None:
+    first = preview_state_key("search", 1, "/tmp/a.pdf", 37)
+    second = preview_state_key("search", 2, "/tmp/a.pdf", 37)
+    third = preview_state_key("ask", 1, "/tmp/a.pdf", 37)
+
+    assert first != second
+    assert first != third
+    assert "preview" in first

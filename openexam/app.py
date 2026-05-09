@@ -8,12 +8,12 @@ from openexam.ask import LLMError, ask_question, format_evidence, format_source,
 from openexam.config import DEFAULT_CONFIG
 from openexam.db import connect, failed_documents, index_stats
 from openexam.embeddings import EmbeddingError, embedding_status
-from openexam.file_utils import open_local_file, open_pdf_page_in_chrome, reveal_local_file
+from openexam.file_utils import open_local_file, reveal_local_file
 from openexam.ingest import ingest_directory
 from openexam.ollama_utils import choose_default_llm_model, ensure_ollama_running, list_ollama_models
 from openexam.pdf_preview import PdfPreviewError, render_pdf_page
 from openexam.search import search_index
-from openexam.ui_state import build_ask_signature
+from openexam.ui_state import build_ask_signature, build_search_signature, preview_state_key
 
 
 def format_location(result) -> str:
@@ -111,19 +111,31 @@ def cached_pdf_page(path: str, mtime: float, page_number: int, zoom: float) -> b
     return render_pdf_page(path, page_number, zoom=zoom)
 
 
-def show_file_actions(path: str, page_number: int | None, key_prefix: str) -> None:
+def clear_preview_state(prefix: str) -> None:
+    for key in list(st.session_state.keys()):
+        if isinstance(key, str) and key.startswith(f"{prefix}:preview:"):
+            st.session_state.pop(key, None)
+
+
+def show_file_actions(path: str, page_number: int | None, key_prefix: str, chunk_db_id: int) -> None:
     target = Path(path)
     is_pdf_page = target.suffix.lower() == ".pdf" and page_number is not None
     if is_pdf_page:
+        preview_key = preview_state_key(key_prefix, chunk_db_id, path, page_number)
         if st.button("预览该页", key=f"{key_prefix}-preview"):
-            try:
-                image = cached_pdf_page(str(target), target.stat().st_mtime, int(page_number), 1.5)
-            except (OSError, PdfPreviewError) as exc:
-                st.error(str(exc))
+            st.session_state[preview_key] = True
+        if st.session_state.get(preview_key):
+            if st.button("隐藏预览", key=f"{key_prefix}-hide-preview"):
+                st.session_state.pop(preview_key, None)
             else:
-                st.caption(f"page {page_number}")
-                st.image(image)
-    col1, col2, col3 = st.columns(3)
+                try:
+                    image = cached_pdf_page(str(target), target.stat().st_mtime, int(page_number), 1.5)
+                except (OSError, PdfPreviewError) as exc:
+                    st.error(str(exc))
+                else:
+                    st.caption(f"page {page_number}")
+                    st.image(image)
+    col1, col2 = st.columns(2)
     if col1.button("打开文件", key=f"{key_prefix}-open"):
         ok, message = open_local_file(path)
         if ok:
@@ -136,17 +148,11 @@ def show_file_actions(path: str, page_number: int | None, key_prefix: str) -> No
             st.success(message)
         else:
             st.error(message)
-    if is_pdf_page and col3.button("用 Chrome 打开到该页", key=f"{key_prefix}-chrome"):
-        ok, message = open_pdf_page_in_chrome(path, page_number)
-        if ok:
-            st.success(message)
-        else:
-            st.error(message)
 
 
 def render_ask_response_block(response, stale: bool = False) -> None:
     if stale:
-        st.warning("参数已改变，请重新点击生成回答。下面显示的是旧结果。")
+        st.warning("参数已改变，请点击搜索更新结果。下面显示的是旧结果。")
     response_config_text = (
         f"mode={response.search_mode}, scope={response.scope}, prefer={response.prefer}, "
         f"per_file_cap={response.per_file_cap}, top_k={response.top_k}"
@@ -172,7 +178,7 @@ def render_ask_response_block(response, stale: bool = False) -> None:
     if response.results:
         for index, result in enumerate(response.results, start=1):
             st.code(format_source(result, index), language="text")
-            show_file_actions(result.source_path, result.page_number, f"ask-{index}-{result.chunk_db_id}")
+            show_file_actions(result.source_path, result.page_number, f"ask-{index}-{result.chunk_db_id}", result.chunk_db_id)
     else:
         st.code("无本地来源", language="text")
 
@@ -234,12 +240,6 @@ def main() -> None:
     evidence_policy = st.selectbox("Evidence policy", options=["warn", "strict", "open"], index=0)
     detail_label = st.selectbox("Detail", options=["简洁", "标准", "详细"], index=1)
     detail = {"简洁": "concise", "标准": "standard", "详细": "detailed"}[detail_label]
-    if not query.strip():
-        st.info("请输入搜索内容。")
-        return
-    if not DEFAULT_CONFIG.db_path.exists():
-        st.warning("还没有索引，请先建立索引。")
-        return
 
     config_text = f"mode={mode}, scope={scope}, prefer={prefer}, per_file_cap={int(per_file_cap)}, top_k={int(top_k)}"
     if action == "Ask local AI":
@@ -255,14 +255,21 @@ def main() -> None:
             detail=detail,
         )
         col1, col2 = st.columns(2)
-        generate_clicked = col1.button("生成回答", type="primary")
-        clear_clicked = col2.button("清除回答")
+        generate_clicked = col1.button("搜索", type="primary")
+        clear_clicked = col2.button("清除")
         if clear_clicked:
             st.session_state.pop("last_ask_signature", None)
             st.session_state.pop("last_ask_response", None)
-            st.info("已清除回答。")
+            clear_preview_state("ask")
+            st.info("已清除 Ask 结果。")
             return
         if generate_clicked:
+            if not query.strip():
+                st.warning("请输入问题。")
+                return
+            if not DEFAULT_CONFIG.db_path.exists():
+                st.warning("还没有索引，请先建立索引。")
+                return
             try:
                 response = ask_question(
                     query,
@@ -285,28 +292,64 @@ def main() -> None:
 
         response = st.session_state.get("last_ask_response")
         if response is None:
-            st.info("点击“生成回答”后才会调用本地 LLM。")
+            st.info("点击“搜索”后才会调用本地 LLM。")
             return
         stale = st.session_state.get("last_ask_signature") != ask_signature
         render_ask_response_block(response, stale=stale)
         return
 
-    try:
-        timing: dict[str, float] = {}
-        results = search_index(
-            query,
-            top_k=int(top_k),
-            config=DEFAULT_CONFIG,
-            mode=mode,
-            scope=scope,
-            prefer=prefer,
-            per_file_cap=int(per_file_cap),
-            timing=timing,
-        )
-    except EmbeddingError as exc:
-        st.error(f"Semantic search unavailable: {exc}")
-        st.info("请先启动 Ollama：ollama serve；如果模型不存在，请联网时提前运行：ollama pull bge-m3。")
+    search_signature = build_search_signature(
+        query=query,
+        mode=mode,
+        scope=scope,
+        prefer=prefer,
+        per_file_cap=int(per_file_cap),
+        top_k=int(top_k),
+    )
+    col1, col2 = st.columns(2)
+    search_clicked = col1.button("搜索", type="primary")
+    clear_clicked = col2.button("清除")
+    if clear_clicked:
+        st.session_state.pop("last_search_signature", None)
+        st.session_state.pop("last_search_response", None)
+        st.session_state.pop("last_search_timing", None)
+        clear_preview_state("search")
+        st.info("已清除搜索结果。")
         return
+    if search_clicked:
+        if not query.strip():
+            st.warning("请输入搜索内容。")
+            return
+        if not DEFAULT_CONFIG.db_path.exists():
+            st.warning("还没有索引，请先建立索引。")
+            return
+        try:
+            timing: dict[str, float] = {}
+            results = search_index(
+                query,
+                top_k=int(top_k),
+                config=DEFAULT_CONFIG,
+                mode=mode,
+                scope=scope,
+                prefer=prefer,
+                per_file_cap=int(per_file_cap),
+                timing=timing,
+            )
+        except EmbeddingError as exc:
+            st.error(f"Semantic search unavailable: {exc}")
+            st.info("请先启动 Ollama：ollama serve；如果模型不存在，请联网时提前运行：ollama pull bge-m3。")
+            return
+        st.session_state["last_search_signature"] = search_signature
+        st.session_state["last_search_response"] = results
+        st.session_state["last_search_timing"] = timing
+
+    results = st.session_state.get("last_search_response")
+    timing = st.session_state.get("last_search_timing", {})
+    if results is None:
+        st.info("点击“搜索”后才会执行检索。")
+        return
+    if st.session_state.get("last_search_signature") != search_signature:
+        st.warning("参数已改变，请点击搜索更新结果。")
     st.caption(f"Search config: {config_text}")
     st.caption(
         f"耗时: 检索 {timing.get('retrieval_time_ms', 0.0):.1f} ms, "
@@ -325,7 +368,7 @@ def main() -> None:
             )
             st.write(result.snippet)
             st.code(result.source_path, language="text")
-            show_file_actions(result.source_path, result.page_number, f"search-{result.chunk_db_id}")
+            show_file_actions(result.source_path, result.page_number, f"search-{result.chunk_db_id}", result.chunk_db_id)
 
 
 if __name__ == "__main__":
