@@ -46,6 +46,7 @@ class SearchResult(BaseModel):
     document_id: int
     file_name: str
     source_path: str
+    source_type: str = "other"
     location_type: str
     location_label: str
     page_number: int | None = None

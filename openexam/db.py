@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Iterable
 
 from openexam.models import ChunkRecord
+from openexam.sources import classify_source_type
 
 
 SCHEMA_SQL = """
@@ -21,6 +22,7 @@ CREATE TABLE IF NOT EXISTS documents (
   sha256 TEXT,
   indexed_at TEXT,
   status TEXT,
+  source_type TEXT DEFAULT 'other',
   error TEXT
 );
 
@@ -68,7 +70,20 @@ def connect(db_path: Path) -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     conn.executescript(SCHEMA_SQL)
+    migrate_schema(conn)
     return conn
+
+
+def migrate_schema(conn: sqlite3.Connection) -> None:
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(documents)")}
+    if "source_type" not in columns:
+        conn.execute("ALTER TABLE documents ADD COLUMN source_type TEXT DEFAULT 'other'")
+    rows = conn.execute("SELECT id, filename, source_type FROM documents").fetchall()
+    for row in rows:
+        expected = classify_source_type(row["filename"])
+        if row["source_type"] != expected:
+            conn.execute("UPDATE documents SET source_type = ? WHERE id = ?", (expected, row["id"]))
+    conn.commit()
 
 
 def clear_index(conn: sqlite3.Connection) -> None:
@@ -91,10 +106,11 @@ def upsert_document(
     status: str = "indexed",
     error: str | None = None,
 ) -> int:
+    source_type = classify_source_type(path)
     conn.execute(
         """
-        INSERT INTO documents(path, filename, ext, size_bytes, mtime, sha256, indexed_at, status, error)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO documents(path, filename, ext, size_bytes, mtime, sha256, indexed_at, status, source_type, error)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(path) DO UPDATE SET
           filename=excluded.filename,
           ext=excluded.ext,
@@ -103,9 +119,10 @@ def upsert_document(
           sha256=excluded.sha256,
           indexed_at=excluded.indexed_at,
           status=excluded.status,
+          source_type=excluded.source_type,
           error=excluded.error
         """,
-        (str(path), path.name, path.suffix.lower(), size_bytes, mtime, sha256, utc_now(), status, error),
+        (str(path), path.name, path.suffix.lower(), size_bytes, mtime, sha256, utc_now(), status, source_type, error),
     )
     row = get_document_by_path(conn, path)
     if row is None:
@@ -163,11 +180,17 @@ def index_stats(conn: sqlite3.Connection) -> dict[str, int | str | None]:
     failed_count = conn.execute("SELECT COUNT(*) AS count FROM documents WHERE status = 'failed'").fetchone()["count"]
     chunk_count = conn.execute("SELECT COUNT(*) AS count FROM chunks").fetchone()["count"]
     latest = conn.execute("SELECT MAX(indexed_at) AS latest FROM documents").fetchone()["latest"]
+    lecture_count = conn.execute("SELECT COUNT(*) AS count FROM documents WHERE status = 'indexed' AND source_type = 'lecture'").fetchone()["count"]
+    textbook_ocr_count = conn.execute("SELECT COUNT(*) AS count FROM documents WHERE status = 'indexed' AND source_type = 'textbook_ocr'").fetchone()["count"]
+    other_count = conn.execute("SELECT COUNT(*) AS count FROM documents WHERE status = 'indexed' AND source_type = 'other'").fetchone()["count"]
     return {
         "documents": int(doc_count),
         "failed_documents": int(failed_count),
         "chunks": int(chunk_count),
         "latest_indexed_at": latest,
+        "lecture_documents": int(lecture_count),
+        "textbook_ocr_documents": int(textbook_ocr_count),
+        "other_documents": int(other_count),
     }
 
 

@@ -49,7 +49,15 @@ def cmd_search(args: argparse.Namespace) -> int:
         print("Empty query. Please provide search text.", file=sys.stderr)
         return 2
     try:
-        results = search_index(args.query, top_k=args.top_k, config=DEFAULT_CONFIG, mode=args.mode)
+        results = search_index(
+            args.query,
+            top_k=args.top_k,
+            config=DEFAULT_CONFIG,
+            mode=args.mode,
+            scope=args.scope,
+            prefer=args.prefer,
+            per_file_cap=args.per_file_cap,
+        )
     except EmbeddingError as exc:
         print(f"Semantic search unavailable: {exc}", file=sys.stderr)
         print("Run `python3 -m openexam embed` after starting Ollama and installing the embedding model.", file=sys.stderr)
@@ -63,7 +71,7 @@ def cmd_search(args: argparse.Namespace) -> int:
     for index, result in enumerate(results, start=1):
         print(
             f"\n[{index}] mode {result.mode} | score {result.score:.2f} | "
-            f"{result.file_name} | {_format_location(result)} | {result.match_type}"
+            f"{result.file_name} | {_format_location(result)} | {result.source_type} | {result.match_type}"
         )
         print(result.snippet)
         print(result.source_path)
@@ -100,6 +108,9 @@ def cmd_status(args: argparse.Namespace) -> int:
         print(f"Indexed documents: {stats['documents']}")
         print(f"Failed documents: {stats['failed_documents']}")
         print(f"Chunks: {stats['chunks']}")
+        print(f"Lecture documents: {stats['lecture_documents']}")
+        print(f"Textbook OCR documents: {stats['textbook_ocr_documents']}")
+        print(f"Other documents: {stats['other_documents']}")
         print(f"Latest indexed at: {stats['latest_indexed_at']}")
         semantic = embedding_status(DEFAULT_CONFIG)
         print(f"Semantic index: {'ready' if semantic.valid else 'not ready'}")
@@ -136,6 +147,24 @@ def build_parser() -> argparse.ArgumentParser:
         choices=("keyword", "fuzzy", "hybrid", "semantic"),
         default="hybrid",
         help="Search mode: keyword uses FTS5 plus substring fallback; fuzzy uses rapidfuzz; semantic uses local embeddings; hybrid combines available signals.",
+    )
+    search_parser.add_argument(
+        "--scope",
+        choices=("all", "lecture", "textbook_ocr", "other"),
+        default="all",
+        help="Restrict results to a source type. Default: all.",
+    )
+    search_parser.add_argument(
+        "--prefer",
+        choices=("none", "lecture", "textbook_ocr"),
+        default="none",
+        help="Lightly boost a source type without filtering. Default: none.",
+    )
+    search_parser.add_argument(
+        "--per-file-cap",
+        type=int,
+        default=0,
+        help="Maximum results per file. 0 disables the cap.",
     )
     search_parser.set_defaults(func=cmd_search)
 

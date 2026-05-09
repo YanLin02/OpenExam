@@ -45,6 +45,10 @@ def show_index_status() -> None:
         col5.metric("Semantic", "ready" if semantic.valid else "missing/stale")
         col6.metric("Embeddings", semantic.vector_count)
         st.caption(f"Embedding model: {semantic.model}. {semantic.message}")
+        st.caption(
+            f"Source types: lecture={stats['lecture_documents']}, "
+            f"textbook_ocr={stats['textbook_ocr_documents']}, other={stats['other_documents']}"
+        )
         failures = failed_documents(conn, limit=10)
         if failures:
             with st.expander("Recent failed files"):
@@ -92,6 +96,9 @@ def main() -> None:
     st.divider()
     query = st.text_input("搜索", value="")
     mode = st.selectbox("Search mode", options=["hybrid", "keyword", "fuzzy", "semantic"], index=0)
+    scope = st.selectbox("Scope", options=["all", "lecture", "textbook_ocr", "other"], index=0)
+    prefer = st.selectbox("Prefer", options=["none", "lecture", "textbook_ocr"], index=0)
+    per_file_cap = st.number_input("Per-file cap", min_value=0, max_value=20, value=0, step=1)
     top_k = st.number_input("Top-k", min_value=1, max_value=50, value=10, step=1)
     if not query.strip():
         st.info("请输入搜索内容。")
@@ -101,17 +108,29 @@ def main() -> None:
         return
 
     try:
-        results = search_index(query, top_k=int(top_k), config=DEFAULT_CONFIG, mode=mode)
+        results = search_index(
+            query,
+            top_k=int(top_k),
+            config=DEFAULT_CONFIG,
+            mode=mode,
+            scope=scope,
+            prefer=prefer,
+            per_file_cap=int(per_file_cap),
+        )
     except EmbeddingError as exc:
         st.error(f"Semantic search unavailable: {exc}")
         st.info("请先启动 Ollama：ollama serve；如果模型不存在，请联网时提前运行：ollama pull bge-m3。")
         return
+    st.caption(f"Search config: mode={mode}, scope={scope}, prefer={prefer}, per_file_cap={int(per_file_cap)}, top_k={int(top_k)}")
     if not results:
         st.info(f"No results found. mode={mode}")
     for result in results:
         with st.container(border=True):
             st.subheader(result.file_name)
-            st.caption(f"mode {result.mode} | {format_location(result)} | score {result.score:.2f} | {result.match_type}")
+            st.caption(
+                f"mode {result.mode} | {format_location(result)} | source {result.source_type} | "
+                f"score {result.score:.2f} | {result.match_type}"
+            )
             st.write(result.snippet)
             st.code(result.source_path, language="text")
 

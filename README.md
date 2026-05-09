@@ -69,6 +69,31 @@ Search modes:
 
 Results include mode, score, file name, page/slide/paragraph, snippet, and full path. Chinese snippets are centered around local substring matches where possible.
 
+Result control options:
+
+- `--scope all|lecture|textbook_ocr|other`: hard-filter results by source type. Default: `all`.
+- `--prefer none|lecture|textbook_ocr`: lightly boost a source type without filtering. Default: `none`.
+- `--per-file-cap N`: limit repeated results from the same file. `0` disables the cap.
+
+Source types are inferred from file names:
+
+- `lecture`: files such as `Chapter...`, `Course Overview...`, `附录...`, or courseware-like PDFs.
+- `textbook_ocr`: files whose names contain `OCR` or `layered`.
+- `other`: files that do not match the above.
+
+Recommended exam searches:
+
+```bash
+# Prefer course slides / lecture PDFs.
+python -m openexam search "Transformer 中注意力机制的作用" --mode hybrid --scope lecture --top-k 5
+
+# Prefer full OCR textbook explanations.
+python -m openexam search "为什么正则化可以缓解过拟合" --mode semantic --scope textbook_ocr --top-k 5
+
+# Balanced results, with course slides lightly preferred and no single file dominating.
+python -m openexam search "生成对抗网络的训练目标" --mode hybrid --prefer lecture --per-file-cap 2 --top-k 5
+```
+
 ## Semantic Search
 
 Semantic search is optional and local. It uses Ollama at `http://127.0.0.1:11434` with the default embedding model `bge-m3`.
@@ -208,6 +233,8 @@ python3 -m openexam search "正则化 优化" --top-k 5 --mode hybrid
 python3 -m openexam search "生成对抗网络" --top-k 5 --mode hybrid
 python3 -m openexam search "卷积神经网络" --top-k 5 --mode hybrid
 python3 -m openexam search "Transformer 中注意力机制的作用" --top-k 5 --mode semantic
+python3 -m openexam search "Transformer 中注意力机制的作用" --mode hybrid --scope lecture --top-k 5
+python3 -m openexam search "为什么正则化可以缓解过拟合" --mode hybrid --prefer lecture --per-file-cap 2 --top-k 5
 python3 -m pytest
 streamlit run openexam/app.py --server.address 127.0.0.1
 ```

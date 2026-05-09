@@ -24,6 +24,7 @@ def fts_search(conn: sqlite3.Connection, query: str, limit: int) -> list[sqlite3
                 SELECT
                   c.id AS chunk_db_id,
                   c.document_id,
+                  d.source_type,
                   c.chunk_id,
                   c.source_path,
                   c.file_name,
@@ -37,6 +38,7 @@ def fts_search(conn: sqlite3.Connection, query: str, limit: int) -> list[sqlite3
                   bm25(chunks_fts) AS rank
                 FROM chunks_fts
                 JOIN chunks c ON c.id = chunks_fts.rowid
+                JOIN documents d ON d.id = c.document_id
                 WHERE chunks_fts MATCH ?
                 ORDER BY rank
                 LIMIT ?
@@ -55,6 +57,7 @@ def all_chunks_for_fuzzy(conn: sqlite3.Connection, limit: int) -> list[sqlite3.R
             SELECT
               c.id AS chunk_db_id,
               c.document_id,
+              d.source_type,
               c.chunk_id,
               c.source_path,
               c.file_name,
@@ -66,6 +69,7 @@ def all_chunks_for_fuzzy(conn: sqlite3.Connection, limit: int) -> list[sqlite3.R
               c.text,
               c.text_norm
             FROM chunks c
+            JOIN documents d ON d.id = c.document_id
             ORDER BY c.id
             LIMIT ?
             """,

@@ -15,6 +15,7 @@ from openexam.search.rank import (
     combine_keyword_scores,
     normalize_fts_scores,
 )
+from openexam.sources import SearchScope, SourcePreference, scope_matches
 from openexam.text_utils import make_snippet, substring_score
 
 
@@ -69,9 +70,18 @@ def search_index(
     top_k: int = 10,
     config: AppConfig = DEFAULT_CONFIG,
     mode: SearchMode = "hybrid",
+    scope: SearchScope = "all",
+    prefer: SourcePreference = "none",
+    per_file_cap: int = 0,
 ) -> list[SearchResult]:
     if mode not in {"keyword", "fuzzy", "hybrid", "semantic"}:
         raise ValueError("mode must be one of: keyword, fuzzy, hybrid, semantic")
+    if scope not in {"all", "lecture", "textbook_ocr", "other"}:
+        raise ValueError("scope must be one of: all, lecture, textbook_ocr, other")
+    if prefer not in {"none", "lecture", "textbook_ocr"}:
+        raise ValueError("prefer must be one of: none, lecture, textbook_ocr")
+    if per_file_cap < 0:
+        raise ValueError("per_file_cap must be non-negative")
 
     query_norm = normalized_query(query)
     if not query_norm:
@@ -81,11 +91,12 @@ def search_index(
     conn.row_factory = sqlite3.Row
     try:
         fts_rows = fts_search(conn, query, config.fts_candidate_limit) if mode in {"keyword", "hybrid"} else []
+        fts_rows = [row for row in fts_rows if scope_matches(row["source_type"], scope)]
         fts_raw = {int(row["chunk_db_id"]): float(row["rank"]) for row in fts_rows}
         fts_norm = normalize_fts_scores(fts_raw)
 
         candidates: dict[int, sqlite3.Row] = {int(row["chunk_db_id"]): row for row in fts_rows}
-        all_rows = all_chunks_for_fuzzy(conn, config.fuzzy_scan_limit)
+        all_rows = [row for row in all_chunks_for_fuzzy(conn, config.fuzzy_scan_limit) if scope_matches(row["source_type"], scope)]
         all_by_id = {int(row["chunk_db_id"]): row for row in all_rows}
 
         substring_scores: dict[int, float] = {}
@@ -142,6 +153,8 @@ def search_index(
                 score = combine_hybrid_scores(fts_score, sub_score, text_score, filename_score, sem_rank_score)
             if score <= 0:
                 continue
+            if prefer != "none" and row["source_type"] == prefer:
+                score = min(100.0, round(score * 1.08, 2))
             match_type = _match_type(fts_score, sub_score, text_score, sem_score, mode)
             results.append(
                 SearchResult(
@@ -149,6 +162,7 @@ def search_index(
                     document_id=int(row["document_id"]),
                     file_name=row["file_name"],
                     source_path=row["source_path"],
+                    source_type=row["source_type"],
                     location_type=row["location_type"],
                     location_label=row["location_label"],
                     page_number=row["page_number"],
@@ -168,6 +182,18 @@ def search_index(
                 )
             )
         results.sort(key=lambda result: result.score, reverse=True)
+        if per_file_cap > 0:
+            capped: list[SearchResult] = []
+            counts: dict[str, int] = {}
+            for result in results:
+                count = counts.get(result.source_path, 0)
+                if count >= per_file_cap:
+                    continue
+                counts[result.source_path] = count + 1
+                capped.append(result)
+                if len(capped) >= top_k:
+                    break
+            return capped
         return results[:top_k]
     finally:
         conn.close()

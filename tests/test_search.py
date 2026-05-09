@@ -7,6 +7,15 @@ from openexam.db import connect
 from openexam.embeddings import EmbeddingError
 from openexam.ingest import ingest_directory
 from openexam.search import search_index
+from openexam.sources import classify_source_type
+
+
+def test_source_type_classification() -> None:
+    assert classify_source_type("Chapter+4-Transformer.pdf") == "lecture"
+    assert classify_source_type("Course Overview.pdf") == "lecture"
+    assert classify_source_type("附录A+基础知识.pdf") == "lecture"
+    assert classify_source_type("[OCR]_深度学习.layered.pdf") == "textbook_ocr"
+    assert classify_source_type("random notes.pdf") == "other"
 
 
 def test_ingest_and_search_txt(tmp_path) -> None:
@@ -100,6 +109,58 @@ def test_fuzzy_mode_handles_chinese_typo(tmp_path) -> None:
     assert results
     assert results[0].file_name == "cnn.md"
     assert results[0].fuzzy_text_score > 0.8
+
+
+def test_scope_filter_limits_source_type(tmp_path) -> None:
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    (data_dir / "Chapter+lecture.md").write_text("Transformer attention mechanism.", encoding="utf-8")
+    (data_dir / "[OCR]_book.layered.md").write_text("Transformer attention mechanism.", encoding="utf-8")
+    config = AppConfig(index_dir=tmp_path / ".openexam", chunk_size=800, chunk_overlap=120)
+    ingest_directory(data_dir, config=config, rebuild=True)
+
+    lecture_results = search_index("Transformer", top_k=5, config=config, mode="hybrid", scope="lecture")
+    ocr_results = search_index("Transformer", top_k=5, config=config, mode="hybrid", scope="textbook_ocr")
+
+    assert lecture_results
+    assert {result.source_type for result in lecture_results} == {"lecture"}
+    assert ocr_results
+    assert {result.source_type for result in ocr_results} == {"textbook_ocr"}
+
+
+def test_prefer_boost_changes_scores_without_filtering(tmp_path) -> None:
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    (data_dir / "Chapter+lecture.md").write_text("sharedtopic identical content.", encoding="utf-8")
+    (data_dir / "other.md").write_text("sharedtopic identical content.", encoding="utf-8")
+    config = AppConfig(index_dir=tmp_path / ".openexam", chunk_size=800, chunk_overlap=120)
+    ingest_directory(data_dir, config=config, rebuild=True)
+
+    results = search_index("sharedtopic", top_k=5, config=config, mode="fuzzy", prefer="lecture")
+    scores = {result.source_type: result.score for result in results}
+
+    assert {"lecture", "other"}.issubset(scores)
+    assert scores["lecture"] > scores["other"]
+
+
+def test_per_file_cap_limits_repeated_file_results(tmp_path) -> None:
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    (data_dir / "Chapter+many.md").write_text(
+        "Transformer attention one.\n\nTransformer attention two.\n\nTransformer attention three.",
+        encoding="utf-8",
+    )
+    (data_dir / "other.md").write_text("Transformer attention four.", encoding="utf-8")
+    config = AppConfig(index_dir=tmp_path / ".openexam", chunk_size=800, chunk_overlap=120)
+    ingest_directory(data_dir, config=config, rebuild=True)
+
+    results = search_index("Transformer", top_k=4, config=config, mode="hybrid", per_file_cap=1)
+
+    counts: dict[str, int] = {}
+    for result in results:
+        counts[result.source_path] = counts.get(result.source_path, 0) + 1
+    assert results
+    assert max(counts.values()) == 1
 
 
 def test_semantic_mode_uses_semantic_scores(tmp_path, monkeypatch) -> None:
