@@ -4,7 +4,7 @@ from pathlib import Path
 
 import streamlit as st
 
-from openexam.ask import LLMError, ask_question, format_evidence, format_source
+from openexam.ask import LLMError, ask_question, format_evidence, format_source, render_ask_response
 from openexam.config import DEFAULT_CONFIG
 from openexam.db import connect, failed_documents, index_stats
 from openexam.embeddings import EmbeddingError, embedding_status
@@ -106,6 +106,7 @@ def main() -> None:
     top_default = DEFAULT_CONFIG.llm_context_top_k if action == "Ask local AI" else 10
     top_k = st.number_input("Top-k", min_value=1, max_value=50, value=top_default, step=1)
     llm_model = st.text_input("LLM model", value=DEFAULT_CONFIG.llm_model)
+    evidence_policy = st.selectbox("Evidence policy", options=["warn", "strict", "open"], index=0)
     if not query.strip():
         st.info("请输入搜索内容。")
         return
@@ -125,20 +126,30 @@ def main() -> None:
                 per_file_cap=int(per_file_cap),
                 top_k=int(top_k),
                 llm_model=llm_model,
+                evidence_policy=evidence_policy,
             )
         except (EmbeddingError, LLMError) as exc:
             st.error(str(exc))
             st.info("请确认 Ollama 已启动：ollama serve；如果模型不存在，请联网时提前运行：ollama pull qwen3:8b。")
             return
-        st.caption(f"检索配置: {config_text}, llm_model={response.llm_model}")
+        st.caption(
+            f"检索配置: {config_text}, llm_model={response.llm_model}, "
+            f"evidence_policy={response.evidence_policy}, evidence_status={response.evidence_status}"
+        )
         st.subheader("LLM 回答")
-        st.write(response.answer)
+        st.markdown(render_ask_response(response).replace("\n", "  \n"))
         st.subheader("依据片段")
-        for index, result in enumerate(response.results, start=1):
-            st.write(format_evidence(result, index))
+        if response.results:
+            for index, result in enumerate(response.results, start=1):
+                st.write(format_evidence(result, index))
+        else:
+            st.write("无本地依据")
         st.subheader("来源列表")
-        for index, result in enumerate(response.results, start=1):
-            st.code(format_source(result, index), language="text")
+        if response.results:
+            for index, result in enumerate(response.results, start=1):
+                st.code(format_source(result, index), language="text")
+        else:
+            st.code("无本地来源", language="text")
         return
 
     try:

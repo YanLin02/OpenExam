@@ -96,6 +96,7 @@ def cmd_ask(args: argparse.Namespace) -> int:
             per_file_cap=args.per_file_cap,
             top_k=args.top_k,
             llm_model=args.llm_model,
+            evidence_policy=args.evidence_policy,
         )
     except EmbeddingError as exc:
         print(f"Retrieval unavailable: {exc}", file=sys.stderr)
@@ -105,7 +106,8 @@ def cmd_ask(args: argparse.Namespace) -> int:
         return 2
     print(
         f"检索配置：mode={response.search_mode}, scope={response.scope}, prefer={response.prefer}, "
-        f"per_file_cap={response.per_file_cap}, top_k={response.top_k}, llm_model={response.llm_model}\n"
+        f"per_file_cap={response.per_file_cap}, top_k={response.top_k}, llm_model={response.llm_model}, "
+        f"evidence_policy={response.evidence_policy}, evidence_status={response.evidence_status}\n"
     )
     print(render_ask_response(response))
     return 0
@@ -232,6 +234,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--llm-model",
         default=DEFAULT_CONFIG.llm_model,
         help="Local Ollama LLM model to use. Default: qwen3:8b.",
+    )
+    ask_parser.add_argument(
+        "--evidence-policy",
+        choices=("strict", "warn", "open"),
+        default="warn",
+        help="How ask handles insufficient local evidence. strict refuses, warn answers with warnings, open answers even with no local evidence. Default: warn.",
     )
     ask_parser.set_defaults(func=cmd_ask)
 

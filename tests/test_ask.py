@@ -6,8 +6,11 @@ from io import BytesIO
 from openexam.ask import (
     LLMError,
     NO_EVIDENCE,
+    NO_LOCAL_EVIDENCE_WARNING,
+    PARTIAL_EVIDENCE_WARNING,
     build_ask_prompt,
     context_supports_question,
+    evidence_status_for_question,
     extract_question_key_phrases,
     format_evidence,
     format_source,
@@ -40,9 +43,8 @@ def make_result(index: int = 1) -> SearchResult:
 def test_build_ask_prompt_limits_llm_to_chunks() -> None:
     prompt = build_ask_prompt("注意力机制的作用是什么？", [make_result()])
 
-    assert "只能基于下面给出的检索片段回答" in prompt
+    assert "资料依据状态：sufficient" in prompt
     assert "不允许编造" in prompt
-    assert NO_EVIDENCE in prompt
     assert "文件名: Chapter+4-Transformer.pdf" in prompt
     assert "路径: /tmp/Chapter+4-Transformer.pdf" in prompt
     assert "不要输出“回答：”“依据：”“来源：”标题" in prompt
@@ -55,7 +57,7 @@ def test_citation_formatting() -> None:
     assert format_source(result, 1) == "[1] Chapter+4-Transformer.pdf, page 37, lecture, /tmp/Chapter+4-Transformer.pdf"
 
 
-def test_no_results_do_not_call_llm(monkeypatch, tmp_path) -> None:
+def test_no_results_strict_does_not_call_llm(monkeypatch, tmp_path) -> None:
     called = False
 
     def fake_search(*args, **kwargs):
@@ -68,12 +70,37 @@ def test_no_results_do_not_call_llm(monkeypatch, tmp_path) -> None:
 
     monkeypatch.setattr("openexam.ask.search_index", fake_search)
     monkeypatch.setattr("openexam.ask.ollama_chat", fake_chat)
-    response = ask_question("不存在的问题", config=AppConfig(index_dir=tmp_path / ".openexam"))
+    response = ask_question("不存在的问题", config=AppConfig(index_dir=tmp_path / ".openexam"), evidence_policy="strict")
 
     assert response.answer == NO_EVIDENCE
     assert not response.llm_called
     assert not called
     assert render_ask_response(response) == NO_EVIDENCE
+
+
+def test_no_results_warn_calls_llm_without_fake_sources(monkeypatch, tmp_path) -> None:
+    called = False
+
+    def fake_search(*args, **kwargs):
+        return []
+
+    def fake_chat(prompt, config, model=None):
+        nonlocal called
+        called = True
+        assert "资料依据状态：none" in prompt
+        return "没有本地依据时，只能给出通用解释。"
+
+    monkeypatch.setattr("openexam.ask.search_index", fake_search)
+    monkeypatch.setattr("openexam.ask.ollama_chat", fake_chat)
+    response = ask_question("一个本地资料中不存在的随机问题", config=AppConfig(index_dir=tmp_path / ".openexam"))
+    rendered = render_ask_response(response)
+
+    assert called
+    assert response.llm_called
+    assert response.evidence_status == "none"
+    assert NO_LOCAL_EVIDENCE_WARNING in rendered
+    assert "依据：\n无本地依据" in rendered
+    assert "来源：\n无本地来源" in rendered
 
 
 def test_ask_calls_search_then_llm(monkeypatch, tmp_path) -> None:
@@ -96,7 +123,35 @@ def test_ask_calls_search_then_llm(monkeypatch, tmp_path) -> None:
     assert "Chapter+4-Transformer.pdf, page 37, lecture" in rendered
 
 
-def test_insufficient_context_does_not_call_llm(monkeypatch, tmp_path) -> None:
+def test_partial_evidence_warn_calls_llm_with_warning(monkeypatch, tmp_path) -> None:
+    called = False
+
+    def fake_search(*args, **kwargs):
+        return [make_result()]
+
+    def fake_chat(*args, **kwargs):
+        nonlocal called
+        called = True
+        assert "资料依据状态：partial" in args[0]
+        return "本地资料只支持 Transformer 注意力部分；局部连接和权值共享需要通用知识补充。"
+
+    monkeypatch.setattr("openexam.ask.search_index", fake_search)
+    monkeypatch.setattr("openexam.ask.ollama_chat", fake_chat)
+    response = ask_question(
+        "卷积神经网络的局部连接和权值共享是什么意思",
+        config=AppConfig(index_dir=tmp_path / ".openexam"),
+    )
+    rendered = render_ask_response(response)
+
+    assert response.evidence_status == "partial"
+    assert response.llm_called
+    assert called
+    assert PARTIAL_EVIDENCE_WARNING in rendered
+    assert "资料依据状态：" in rendered
+    assert "补充说明：" in rendered
+
+
+def test_insufficient_context_strict_does_not_call_llm(monkeypatch, tmp_path) -> None:
     called = False
 
     def fake_search(*args, **kwargs):
@@ -112,11 +167,36 @@ def test_insufficient_context_does_not_call_llm(monkeypatch, tmp_path) -> None:
     response = ask_question(
         "卷积神经网络的局部连接和权值共享是什么意思",
         config=AppConfig(index_dir=tmp_path / ".openexam"),
+        evidence_policy="strict",
     )
 
     assert response.answer == NO_EVIDENCE
+    assert response.evidence_status == "partial"
     assert not response.llm_called
     assert not called
+
+
+def test_open_policy_no_results_calls_llm(monkeypatch, tmp_path) -> None:
+    def fake_search(*args, **kwargs):
+        return []
+
+    def fake_chat(prompt, config, model=None):
+        assert "资料依据状态：none" in prompt
+        return "这是通用知识解释。"
+
+    monkeypatch.setattr("openexam.ask.search_index", fake_search)
+    monkeypatch.setattr("openexam.ask.ollama_chat", fake_chat)
+    response = ask_question(
+        "一个本地资料中不存在的随机问题",
+        config=AppConfig(index_dir=tmp_path / ".openexam"),
+        evidence_policy="open",
+    )
+    rendered = render_ask_response(response)
+
+    assert response.llm_called
+    assert response.evidence_status == "none"
+    assert NO_LOCAL_EVIDENCE_WARNING in rendered
+    assert "无本地来源" in rendered
 
 
 def test_question_key_phrase_support() -> None:
@@ -124,6 +204,8 @@ def test_question_key_phrase_support() -> None:
     assert phrases == ["正则化", "过拟合"]
     assert context_supports_question("Transformer 中注意力机制的作用", [make_result()])
     assert not context_supports_question("卷积神经网络的局部连接和权值共享是什么意思", [make_result()])
+    assert evidence_status_for_question("卷积神经网络的局部连接和权值共享是什么意思", [make_result()])[0] == "partial"
+    assert evidence_status_for_question("一个本地资料中不存在的随机问题", [])[0] == "none"
 
 
 def test_ollama_unavailable_error(monkeypatch, tmp_path) -> None:

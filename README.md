@@ -155,7 +155,7 @@ ollama pull qwen3:8b
 Run cited Q&A:
 
 ```bash
-python -m openexam ask "Transformer 中注意力机制的作用" --mode hybrid --prefer lecture --per-file-cap 2 --top-k 6
+python -m openexam ask "Transformer 中注意力机制的作用" --mode hybrid --prefer lecture --per-file-cap 2 --top-k 6 --evidence-policy warn
 ```
 
 `ask` first runs the normal search pipeline, then passes only the returned chunks to the local LLM. The output contains:
@@ -166,17 +166,27 @@ python -m openexam ask "Transformer 中注意力机制的作用" --mode hybrid -
 
 Each source includes file name, page/slide/paragraph, source type, and full path.
 
+Evidence policy controls what happens when retrieved chunks do not fully cover the question:
+
+- `--evidence-policy strict`: most conservative. If local evidence is missing or partial, return `本地资料中未找到充分依据。`
+- `--evidence-policy warn`: recommended for exams. Continue answering, but explicitly label partial or missing local evidence.
+- `--evidence-policy open`: answer even with no local results, while clearly marking that there is no local evidence and without inventing sources.
+
+When evidence is partial, output includes `回答`, `资料依据状态`, `依据`, `来源`, and `补充说明`. When no local results exist, `依据` is `无本地依据` and `来源` is `无本地来源`.
+
 Useful options:
 
 ```bash
-python -m openexam ask "为什么正则化可以缓解过拟合" --mode hybrid --prefer lecture --per-file-cap 2 --top-k 6
-python -m openexam ask "卷积神经网络的局部连接和权值共享是什么意思" --mode hybrid --scope lecture --top-k 6
-python -m openexam ask "生成对抗网络的训练目标是什么" --mode hybrid --prefer lecture --per-file-cap 2 --top-k 6
+python -m openexam ask "为什么正则化可以缓解过拟合" --mode hybrid --prefer lecture --per-file-cap 2 --top-k 6 --evidence-policy warn
+python -m openexam ask "卷积神经网络的局部连接和权值共享是什么意思" --mode hybrid --scope lecture --top-k 6 --evidence-policy strict
+python -m openexam ask "一个本地资料中不存在的随机问题" --evidence-policy open
+python -m openexam ask "生成对抗网络的训练目标是什么" --mode hybrid --prefer lecture --per-file-cap 2 --top-k 6 --evidence-policy warn
 ```
 
 Error handling:
 
-- If no search results are found, OpenExam does not call the LLM and prints `本地资料中未找到充分依据。`
+- If `--evidence-policy strict` is used and local evidence is missing or partial, OpenExam does not call the LLM and prints `本地资料中未找到充分依据。`
+- With the default `--evidence-policy warn`, OpenExam may call the LLM with a clear warning when local evidence is partial or missing.
 - If Ollama is not running, it prints `Ollama is not reachable. Start it with: ollama serve`.
 - If `qwen3:8b` is missing, pull it while online: `ollama pull qwen3:8b`.
 - If semantic index is missing and `ask --mode semantic` is requested, `ask` falls back to `hybrid`.
@@ -243,7 +253,7 @@ Use this checklist before the exam, while network access is still available:
 
    ```bash
    ollama pull qwen3:8b
-   python -m openexam ask "Transformer 中注意力机制的作用" --mode hybrid --prefer lecture --per-file-cap 2 --top-k 6
+   python -m openexam ask "Transformer 中注意力机制的作用" --mode hybrid --prefer lecture --per-file-cap 2 --top-k 6 --evidence-policy warn
    ```
 
 8. Start the local UI once and confirm it loads:
@@ -287,7 +297,7 @@ python3 -m openexam search "卷积神经网络" --top-k 5 --mode hybrid
 python3 -m openexam search "Transformer 中注意力机制的作用" --top-k 5 --mode semantic
 python3 -m openexam search "Transformer 中注意力机制的作用" --mode hybrid --scope lecture --top-k 5
 python3 -m openexam search "为什么正则化可以缓解过拟合" --mode hybrid --prefer lecture --per-file-cap 2 --top-k 5
-python3 -m openexam ask "Transformer 中注意力机制的作用" --mode hybrid --prefer lecture --per-file-cap 2 --top-k 6
+python3 -m openexam ask "Transformer 中注意力机制的作用" --mode hybrid --prefer lecture --per-file-cap 2 --top-k 6 --evidence-policy warn
 python3 -m pytest
 streamlit run openexam/app.py --server.address 127.0.0.1
 ```
