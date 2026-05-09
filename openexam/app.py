@@ -8,7 +8,9 @@ from openexam.ask import LLMError, ask_question, format_evidence, format_source,
 from openexam.config import DEFAULT_CONFIG
 from openexam.db import connect, failed_documents, index_stats
 from openexam.embeddings import EmbeddingError, embedding_status
+from openexam.file_utils import file_uri, open_local_file
 from openexam.ingest import ingest_directory
+from openexam.ollama_utils import choose_default_llm_model, ensure_ollama_running, list_ollama_models
 from openexam.search import search_index
 
 
@@ -60,6 +62,48 @@ def show_index_status() -> None:
         conn.close()
 
 
+def show_ollama_status() -> None:
+    with st.expander("Ollama 状态", expanded=False):
+        col1, col2 = st.columns(2)
+        refresh = col1.button("Refresh Ollama status")
+        start = col2.button("Start Ollama")
+        if start:
+            status = ensure_ollama_running(DEFAULT_CONFIG.ollama_base_url, auto_start=True, log_path=DEFAULT_CONFIG.index_dir / "ollama.log")
+        else:
+            status = ensure_ollama_running(DEFAULT_CONFIG.ollama_base_url, auto_start=False, log_path=DEFAULT_CONFIG.index_dir / "ollama.log")
+        if refresh or start or True:
+            st.write(f"Status: {'running' if status.reachable else 'not reachable'}")
+            st.caption(status.message)
+            st.write(f"Embedding model: {DEFAULT_CONFIG.embedding_model}")
+            st.write(f"Default LLM model: {DEFAULT_CONFIG.llm_model}")
+            if status.models:
+                st.write("Available models:")
+                st.code("\n".join(status.models), language="text")
+            else:
+                st.warning("未找到本地模型列表。请确认 Ollama 已启动。")
+
+
+def show_parameter_help() -> None:
+    with st.expander("搜索参数怎么选", expanded=False):
+        st.markdown(
+            """
+- `mode`: `keyword` 适合查精确术语；`fuzzy` 适合拼写不确定或中文短词；`semantic` 适合自然语言问题；`hybrid` 是默认推荐。
+- `scope`: `all` 搜索全部资料；`lecture` 只搜索课件；`textbook_ocr` 只搜索 OCR 教材；`other` 只搜索其他文件。
+- `prefer`: `none` 不偏向任何来源；`lecture` 轻微优先课件；`textbook_ocr` 轻微优先教材。
+- `per-file-cap`: 限制同一文件最多出现几条结果，避免单个 PDF 霸榜。
+- `evidence-policy`: `strict` 证据不足就拒答；`warn` 证据不足也回答但显式标注，考试推荐；`open` 无本地依据也回答但标注无本地来源。
+- `top-k`: 返回或提供给 LLM 的片段数量，越大越全面但越慢。
+- `detail`: `concise` 快速定位；`standard` 考试推荐；`detailed` 适合复习理解。
+"""
+        )
+
+
+def llm_model_options() -> tuple[list[str], str | None]:
+    models = list_ollama_models(DEFAULT_CONFIG.ollama_base_url)
+    selected = choose_default_llm_model(models, preferred=DEFAULT_CONFIG.llm_model, embedding_model=DEFAULT_CONFIG.embedding_model)
+    return models, selected
+
+
 def main() -> None:
     st.set_page_config(page_title="OpenExam", layout="wide")
     st.title("OpenExam")
@@ -93,9 +137,11 @@ def main() -> None:
                             st.code(error, language="text")
 
     show_index_status()
+    show_ollama_status()
 
     st.divider()
     action = st.radio("Action", options=["Search", "Ask local AI"], horizontal=True)
+    show_parameter_help()
     query = st.text_input("搜索", value="")
     mode = st.selectbox("Search mode", options=["hybrid", "keyword", "fuzzy", "semantic"], index=0)
     scope = st.selectbox("Scope", options=["all", "lecture", "textbook_ocr", "other"], index=0)
@@ -105,8 +151,16 @@ def main() -> None:
     per_file_cap = st.number_input("Per-file cap", min_value=0, max_value=20, value=cap_default, step=1)
     top_default = DEFAULT_CONFIG.llm_context_top_k if action == "Ask local AI" else 10
     top_k = st.number_input("Top-k", min_value=1, max_value=50, value=top_default, step=1)
-    llm_model = st.text_input("LLM model", value=DEFAULT_CONFIG.llm_model)
+    models, selected_llm = llm_model_options()
+    if selected_llm is None:
+        st.warning("未找到本地 LLM 模型。请联网时运行 ollama pull qwen3:8b。")
+        llm_model = st.text_input("LLM model", value=DEFAULT_CONFIG.llm_model)
+    else:
+        model_index = models.index(selected_llm) if selected_llm in models else 0
+        llm_model = st.selectbox("LLM model", options=models, index=model_index)
     evidence_policy = st.selectbox("Evidence policy", options=["warn", "strict", "open"], index=0)
+    detail_label = st.selectbox("Detail", options=["简洁", "标准", "详细"], index=1)
+    detail = {"简洁": "concise", "标准": "standard", "详细": "detailed"}[detail_label]
     if not query.strip():
         st.info("请输入搜索内容。")
         return
@@ -127,6 +181,7 @@ def main() -> None:
                 top_k=int(top_k),
                 llm_model=llm_model,
                 evidence_policy=evidence_policy,
+                detail=detail,
             )
         except (EmbeddingError, LLMError) as exc:
             st.error(str(exc))
@@ -134,7 +189,12 @@ def main() -> None:
             return
         st.caption(
             f"检索配置: {config_text}, llm_model={response.llm_model}, "
-            f"evidence_policy={response.evidence_policy}, evidence_status={response.evidence_status}"
+            f"evidence_policy={response.evidence_policy}, evidence_status={response.evidence_status}, detail={response.detail}"
+        )
+        st.caption(
+            f"耗时: 检索 {response.timing.get('retrieval_time_ms', 0.0):.1f} ms, "
+            f"LLM {response.timing.get('llm_time_ms', 0.0):.1f} ms, "
+            f"总计 {response.timing.get('total_time_ms', 0.0):.1f} ms"
         )
         st.subheader("LLM 回答")
         st.markdown(render_ask_response(response).replace("\n", "  \n"))
@@ -148,11 +208,20 @@ def main() -> None:
         if response.results:
             for index, result in enumerate(response.results, start=1):
                 st.code(format_source(result, index), language="text")
+                if result.page_number is not None:
+                    st.caption(file_uri(result.source_path, result.page_number))
+                if st.button("打开文件", key=f"ask-open-{index}-{result.chunk_db_id}"):
+                    ok, message = open_local_file(result.source_path)
+                    if ok:
+                        st.success(message)
+                    else:
+                        st.error(message)
         else:
             st.code("无本地来源", language="text")
         return
 
     try:
+        timing: dict[str, float] = {}
         results = search_index(
             query,
             top_k=int(top_k),
@@ -161,12 +230,19 @@ def main() -> None:
             scope=scope,
             prefer=prefer,
             per_file_cap=int(per_file_cap),
+            timing=timing,
         )
     except EmbeddingError as exc:
         st.error(f"Semantic search unavailable: {exc}")
         st.info("请先启动 Ollama：ollama serve；如果模型不存在，请联网时提前运行：ollama pull bge-m3。")
         return
     st.caption(f"Search config: {config_text}")
+    st.caption(
+        f"耗时: 检索 {timing.get('retrieval_time_ms', 0.0):.1f} ms, "
+        f"语义 {timing.get('semantic_time_ms', 0.0):.1f} ms, "
+        f"排序 {timing.get('ranking_time_ms', 0.0):.1f} ms, "
+        f"总计 {timing.get('total_time_ms', 0.0):.1f} ms"
+    )
     if not results:
         st.info(f"No results found. mode={mode}")
     for result in results:
@@ -178,6 +254,14 @@ def main() -> None:
             )
             st.write(result.snippet)
             st.code(result.source_path, language="text")
+            if result.page_number is not None:
+                st.caption(file_uri(result.source_path, result.page_number))
+            if st.button("打开文件", key=f"search-open-{result.chunk_db_id}"):
+                ok, message = open_local_file(result.source_path)
+                if ok:
+                    st.success(message)
+                else:
+                    st.error(message)
 
 
 if __name__ == "__main__":

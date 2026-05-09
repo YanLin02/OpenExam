@@ -2,7 +2,7 @@
 
 OpenExam is an offline local search tool for open-book exams. It indexes local course files and returns source-backed results: file name, path, page/slide/paragraph location, snippet, and relevance score.
 
-It does not use cloud APIs, online model services, OCR, FAISS, Chroma, or LLM answer generation. Optional semantic search uses a local Ollama embedding model only.
+It does not use cloud APIs, online model services, OCR, FAISS, or Chroma. Optional semantic search and cited Q&A use local Ollama models only.
 
 ## Supported Files
 
@@ -67,13 +67,15 @@ Search modes:
 - `semantic`: local cosine-similarity search over Ollama embeddings.
 - `hybrid`: default mode, combining FTS5, substring, fuzzy, and semantic scores when a semantic index exists.
 
-Results include mode, score, file name, page/slide/paragraph, snippet, and full path. Chinese snippets are centered around local substring matches where possible.
+Results include mode, score, file name, page/slide/paragraph, snippet, and full path. Chinese snippets are centered around local substring matches where possible. CLI search also prints `total_time_ms`, `retrieval_time_ms`, `semantic_time_ms`, and `ranking_time_ms`.
 
 Result control options:
 
 - `--scope all|lecture|textbook_ocr|other`: hard-filter results by source type. Default: `all`.
 - `--prefer none|lecture|textbook_ocr`: lightly boost a source type without filtering. Default: `none`.
 - `--per-file-cap N`: limit repeated results from the same file. `0` disables the cap.
+- `--open-first`: open the top result file with macOS `open`.
+- `--auto-start-ollama` / `--no-auto-start-ollama`: control whether semantic search tries to start local Ollama with `ollama serve`. Auto-start is enabled by default.
 
 Source types are inferred from file names:
 
@@ -104,7 +106,7 @@ OpenExam never pulls models automatically. Before the exam, while online, instal
 ollama pull bge-m3
 ```
 
-When using semantic search, start Ollama locally:
+When using semantic search, start Ollama locally, or let OpenExam try to start it with `ollama serve`:
 
 ```bash
 ollama serve
@@ -131,10 +133,37 @@ python -m openexam search "Transformer 中注意力机制的作用" --top-k 5 --
 
 Notes:
 
-- If Ollama is not running, `embed` tells you to run `ollama serve`.
+- If Ollama is not running, `embed`, `semantic`, and `ask` can try to start it with `ollama serve`.
 - If `bge-m3` is missing, `embed` tells you to run `ollama pull bge-m3` while online.
 - If chunks, text hashes, or embedding model change, rerun `python -m openexam embed`.
 - `hybrid` falls back to keyword/fuzzy search if the semantic index is missing or stale.
+
+## 搜索参数怎么选
+
+- `mode`
+  - `keyword`: 关键词全文搜索，适合查精确术语。
+  - `fuzzy`: 模糊搜索，适合拼写不确定或中文短词。
+  - `semantic`: 语义搜索，适合用自然语言描述问题。
+  - `hybrid`: 混合搜索，默认推荐。
+- `scope`
+  - `all`: 搜索全部资料。
+  - `lecture`: 只搜索课件。
+  - `textbook_ocr`: 只搜索 OCR 教材。
+  - `other`: 只搜索其他文件。
+- `prefer`
+  - `none`: 不偏向任何来源。
+  - `lecture`: 轻微优先课件，但不硬过滤。
+  - `textbook_ocr`: 轻微优先教材，但不硬过滤。
+- `per-file-cap`: 限制同一文件最多出现几条结果，避免单个 PDF 霸榜。
+- `evidence-policy`
+  - `strict`: 证据不足就拒答。
+  - `warn`: 证据不足也回答，但显式标注，考试推荐。
+  - `open`: 无本地依据也回答，但标注无本地来源。
+- `top-k`: 返回或提供给 LLM 的片段数量，越大越全面但越慢。
+- `detail`
+  - `concise`: 快速定位，回答控制在 3-5 句话。
+  - `standard`: 默认推荐，适合考试现场使用。
+  - `detailed`: 更详细解释，适合复习理解。
 
 ## Local Cited Q&A
 
@@ -155,7 +184,7 @@ ollama pull qwen3:8b
 Run cited Q&A:
 
 ```bash
-python -m openexam ask "Transformer 中注意力机制的作用" --mode hybrid --prefer lecture --per-file-cap 2 --top-k 6 --evidence-policy warn
+python -m openexam ask "Transformer 中注意力机制的作用" --mode hybrid --prefer lecture --per-file-cap 2 --top-k 6 --evidence-policy warn --detail standard
 ```
 
 `ask` first runs the normal search pipeline, then passes only the returned chunks to the local LLM. The output contains:
@@ -164,7 +193,7 @@ python -m openexam ask "Transformer 中注意力机制的作用" --mode hybrid -
 2. `依据`
 3. `来源`
 
-Each source includes file name, page/slide/paragraph, source type, and full path.
+Each source includes file name, page/slide/paragraph, source type, and full path. CLI ask also prints `retrieval_time_ms`, `prompt_build_time_ms`, `llm_time_ms`, and `total_time_ms`.
 
 Evidence policy controls what happens when retrieved chunks do not fully cover the question:
 
@@ -174,13 +203,19 @@ Evidence policy controls what happens when retrieved chunks do not fully cover t
 
 When evidence is partial, output includes `回答`, `资料依据状态`, `依据`, `来源`, and `补充说明`. When no local results exist, `依据` is `无本地依据` and `来源` is `无本地来源`.
 
+Answer detail controls output length:
+
+- `--detail concise`: short answer, useful for fast exam lookup; uses a smaller local generation budget.
+- `--detail standard`: default and recommended for exams.
+- `--detail detailed`: longer explanation for review and understanding; it still must cite local sources or mark insufficient evidence.
+
 Useful options:
 
 ```bash
 python -m openexam ask "为什么正则化可以缓解过拟合" --mode hybrid --prefer lecture --per-file-cap 2 --top-k 6 --evidence-policy warn
 python -m openexam ask "卷积神经网络的局部连接和权值共享是什么意思" --mode hybrid --scope lecture --top-k 6 --evidence-policy strict
 python -m openexam ask "一个本地资料中不存在的随机问题" --evidence-policy open
-python -m openexam ask "生成对抗网络的训练目标是什么" --mode hybrid --prefer lecture --per-file-cap 2 --top-k 6 --evidence-policy warn
+python -m openexam ask "生成对抗网络的训练目标是什么" --mode hybrid --prefer lecture --per-file-cap 2 --top-k 6 --evidence-policy warn --detail detailed
 ```
 
 Error handling:
@@ -190,6 +225,7 @@ Error handling:
 - If Ollama is not running, it prints `Ollama is not reachable. Start it with: ollama serve`.
 - If `qwen3:8b` is missing, pull it while online: `ollama pull qwen3:8b`.
 - If semantic index is missing and `ask --mode semantic` is requested, `ask` falls back to `hybrid`.
+- `--auto-start-ollama` is enabled by default for ask; it only runs local `ollama serve` and never pulls models.
 
 ## Streamlit UI
 
@@ -200,6 +236,16 @@ streamlit run openexam/app.py --server.address 127.0.0.1
 ```
 
 Then enter the material directory, build or rebuild the index, and search with a top-k value.
+
+The UI includes:
+
+- Search mode, scope, source preference, per-file cap, and top-k controls with Chinese parameter explanations.
+- Evidence policy and detail selectors for Ask local AI.
+- Ollama status panel, model list, refresh button, and start button.
+- Local LLM model dropdown. It prefers `qwen3:8b`; if missing, it chooses the first non-embedding local model.
+- Timing display for retrieval, semantic search, ranking, LLM generation, and total time.
+- Open file buttons and local file URI display. For PDFs, OpenExam tries `file:///path/to/file.pdf#page=N`; PDF reader support for `#page` varies.
+- Clear message when the index is missing or no result is found.
 
 ## 考试前检查清单
 

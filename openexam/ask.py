@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -10,6 +11,7 @@ from typing import Any, Literal
 from openexam.config import AppConfig, DEFAULT_CONFIG
 from openexam.embeddings import embedding_status
 from openexam.models import SearchResult
+from openexam.ollama_utils import ensure_ollama_running
 from openexam.search import SearchMode, search_index
 from openexam.sources import SearchScope, SourcePreference
 from openexam.text_utils import normalize_text
@@ -20,6 +22,7 @@ PARTIAL_EVIDENCE_WARNING = "【资料依据不足】本地检索结果未充分�
 NO_LOCAL_EVIDENCE_WARNING = "【未找到本地依据】本地资料中未检索到相关片段，以下回答主要来自模型通用知识，请谨慎使用。"
 EvidenceStatus = Literal["sufficient", "partial", "none"]
 EvidencePolicy = Literal["strict", "warn", "open"]
+AnswerDetail = Literal["concise", "standard", "detailed"]
 ASK_STOPWORDS = (
     "为什么",
     "是什么",
@@ -63,6 +66,8 @@ class AskResponse:
     evidence_status: EvidenceStatus
     evidence_policy: EvidencePolicy
     missing_phrases: list[str]
+    timing: dict[str, float]
+    detail: AnswerDetail
 
 
 def format_location(result: SearchResult) -> str:
@@ -89,6 +94,7 @@ def build_ask_prompt(
     results: list[SearchResult],
     evidence_status: EvidenceStatus = "sufficient",
     missing_phrases: list[str] | None = None,
+    detail: AnswerDetail = "standard",
 ) -> str:
     context_blocks = []
     for index, result in enumerate(results, start=1):
@@ -111,10 +117,16 @@ def build_ask_prompt(
         "partial": "本地检索片段只覆盖了问题的一部分。请先说明本地资料支持了哪些点、缺少哪些点，再给出简短补充解释。补充解释必须明确是通用知识，不得伪装成本地资料。",
         "none": "没有本地检索片段。请明确说明没有本地依据，不得伪造来源、页码、文件名；可以基于通用知识给出简短解释。",
     }
+    detail_rules = {
+        "concise": "回答控制在 3-5 句话。只保留最关键解释，引用 2-3 个最相关片段即可。",
+        "standard": "回答长度适中，覆盖问题主要方面，并保留必要引用。",
+        "detailed": "可以分点说明并展开解释，但不得为了详细而编造来源；所有本地资料结论都必须保留引用。",
+    }
     return f"""你是一个离线开卷考试资料检索助手。
 
 资料依据状态：{evidence_status}
 缺失关键点：{missing}
+输出详细程度：{detail}
 
 严格规则：
 1. {status_rules[evidence_status]}
@@ -123,6 +135,7 @@ def build_ask_prompt(
 4. 如果没有本地检索片段，不要输出引用编号。
 5. 只输出“回答”正文，不要输出“回答：”“依据：”“来源：”标题，也不要输出“补充说明：”标题。
 6. 不要输出思考过程。
+7. {detail_rules[detail]}
 
 问题：
 {question}
@@ -201,7 +214,11 @@ def _post_json(url: str, payload: dict[str, Any], timeout: float, model: str) ->
         raise LLMError("Ollama LLM request timed out.") from exc
 
 
-def ollama_chat(prompt: str, config: AppConfig = DEFAULT_CONFIG, model: str | None = None) -> str:
+def num_predict_for_detail(detail: AnswerDetail) -> int:
+    return {"concise": 512, "standard": 1024, "detailed": 2048}[detail]
+
+
+def ollama_chat(prompt: str, config: AppConfig = DEFAULT_CONFIG, model: str | None = None, num_predict: int = 1024) -> str:
     if config.llm_provider != "ollama":
         raise LLMError(f"Unsupported LLM provider: {config.llm_provider}")
     llm_model = model or config.llm_model
@@ -217,7 +234,7 @@ def ollama_chat(prompt: str, config: AppConfig = DEFAULT_CONFIG, model: str | No
             },
             {"role": "user", "content": prompt},
         ],
-        "options": {"temperature": 0},
+        "options": {"temperature": 0, "num_predict": num_predict},
     }
     response = _post_json(url, payload, timeout=config.llm_timeout_seconds, model=llm_model)
     message = response.get("message", {})
@@ -268,11 +285,16 @@ def ask_question(
     top_k: int | None = None,
     llm_model: str | None = None,
     evidence_policy: EvidencePolicy = "warn",
+    detail: AnswerDetail = "standard",
+    auto_start_ollama: bool = True,
 ) -> AskResponse:
+    total_start = time.perf_counter()
     effective_top_k = top_k if top_k is not None else config.llm_context_top_k
     effective_mode = mode
     if mode == "semantic" and not embedding_status(config).valid:
         effective_mode = "hybrid"
+    search_timing: dict[str, float] = {}
+    retrieval_start = time.perf_counter()
     results = search_index(
         question,
         top_k=effective_top_k,
@@ -281,7 +303,9 @@ def ask_question(
         scope=scope,
         prefer=prefer,
         per_file_cap=per_file_cap,
+        timing=search_timing,
     )
+    retrieval_time_ms = (time.perf_counter() - retrieval_start) * 1000
     evidence_status, missing_phrases = evidence_status_for_question(question, results)
     if evidence_policy == "strict" and evidence_status != "sufficient":
         return AskResponse(
@@ -298,9 +322,23 @@ def ask_question(
             evidence_status=evidence_status,
             evidence_policy=evidence_policy,
             missing_phrases=missing_phrases,
+            timing={
+                "retrieval_time_ms": retrieval_time_ms,
+                "prompt_build_time_ms": 0.0,
+                "llm_time_ms": 0.0,
+                "total_time_ms": (time.perf_counter() - total_start) * 1000,
+            },
+            detail=detail,
         )
-    prompt = build_ask_prompt(question, results, evidence_status=evidence_status, missing_phrases=missing_phrases)
-    answer = ollama_chat(prompt, config=config, model=llm_model)
+    prompt_start = time.perf_counter()
+    prompt = build_ask_prompt(question, results, evidence_status=evidence_status, missing_phrases=missing_phrases, detail=detail)
+    prompt_build_time_ms = (time.perf_counter() - prompt_start) * 1000
+    ollama_status = ensure_ollama_running(config.ollama_base_url, auto_start=auto_start_ollama, log_path=config.index_dir / "ollama.log")
+    if not ollama_status.reachable:
+        raise LLMError(ollama_status.message)
+    llm_start = time.perf_counter()
+    answer = ollama_chat(prompt, config=config, model=llm_model, num_predict=num_predict_for_detail(detail))
+    llm_time_ms = (time.perf_counter() - llm_start) * 1000
     return AskResponse(
         question=question,
         answer=answer,
@@ -315,4 +353,11 @@ def ask_question(
         evidence_status=evidence_status,
         evidence_policy=evidence_policy,
         missing_phrases=missing_phrases,
+        timing={
+            "retrieval_time_ms": retrieval_time_ms,
+            "prompt_build_time_ms": prompt_build_time_ms,
+            "llm_time_ms": llm_time_ms,
+            "total_time_ms": (time.perf_counter() - total_start) * 1000,
+        },
+        detail=detail,
     )

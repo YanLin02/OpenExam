@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import subprocess
 import sys
 from pathlib import Path
 
@@ -8,7 +9,9 @@ from openexam.ask import LLMError, ask_question, render_ask_response
 from openexam.config import DEFAULT_CONFIG
 from openexam.db import connect, failed_documents, index_stats
 from openexam.embeddings import EmbeddingError, build_embeddings, embedding_status
+from openexam.file_utils import file_uri
 from openexam.ingest import ingest_directory
+from openexam.ollama_utils import ensure_ollama_running
 from openexam.search import search_index
 
 
@@ -50,6 +53,16 @@ def cmd_search(args: argparse.Namespace) -> int:
         print("Empty query. Please provide search text.", file=sys.stderr)
         return 2
     try:
+        if args.mode in {"semantic", "hybrid"} and embedding_status(DEFAULT_CONFIG).valid:
+            ollama_status = ensure_ollama_running(
+                DEFAULT_CONFIG.ollama_base_url,
+                auto_start=args.auto_start_ollama,
+                log_path=DEFAULT_CONFIG.index_dir / "ollama.log",
+            )
+            if args.mode == "semantic" and not ollama_status.reachable:
+                print(ollama_status.message, file=sys.stderr)
+                return 2
+        timing: dict[str, float] = {}
         results = search_index(
             args.query,
             top_k=args.top_k,
@@ -58,6 +71,7 @@ def cmd_search(args: argparse.Namespace) -> int:
             scope=args.scope,
             prefer=args.prefer,
             per_file_cap=args.per_file_cap,
+            timing=timing,
         )
     except EmbeddingError as exc:
         print(f"Semantic search unavailable: {exc}", file=sys.stderr)
@@ -69,6 +83,13 @@ def cmd_search(args: argparse.Namespace) -> int:
             status = embedding_status(DEFAULT_CONFIG)
             print(f"Semantic index status: {status.message}")
         return 1
+    print(
+        "timing: "
+        f"total_time_ms={timing.get('total_time_ms', 0.0):.1f}, "
+        f"retrieval_time_ms={timing.get('retrieval_time_ms', 0.0):.1f}, "
+        f"semantic_time_ms={timing.get('semantic_time_ms', 0.0):.1f}, "
+        f"ranking_time_ms={timing.get('ranking_time_ms', 0.0):.1f}"
+    )
     for index, result in enumerate(results, start=1):
         print(
             f"\n[{index}] mode {result.mode} | score {result.score:.2f} | "
@@ -76,6 +97,14 @@ def cmd_search(args: argparse.Namespace) -> int:
         )
         print(result.snippet)
         print(result.source_path)
+        if result.page_number is not None:
+            print(file_uri(result.source_path, result.page_number))
+    if args.open_first and results:
+        try:
+            subprocess.run(["open", results[0].source_path], check=True)
+        except (OSError, subprocess.CalledProcessError) as exc:
+            print(f"Failed to open top result: {exc}", file=sys.stderr)
+            return 2
     return 0
 
 
@@ -97,6 +126,8 @@ def cmd_ask(args: argparse.Namespace) -> int:
             top_k=args.top_k,
             llm_model=args.llm_model,
             evidence_policy=args.evidence_policy,
+            detail=args.detail,
+            auto_start_ollama=args.auto_start_ollama,
         )
     except EmbeddingError as exc:
         print(f"Retrieval unavailable: {exc}", file=sys.stderr)
@@ -107,7 +138,14 @@ def cmd_ask(args: argparse.Namespace) -> int:
     print(
         f"检索配置：mode={response.search_mode}, scope={response.scope}, prefer={response.prefer}, "
         f"per_file_cap={response.per_file_cap}, top_k={response.top_k}, llm_model={response.llm_model}, "
-        f"evidence_policy={response.evidence_policy}, evidence_status={response.evidence_status}\n"
+        f"evidence_policy={response.evidence_policy}, evidence_status={response.evidence_status}, detail={response.detail}\n"
+    )
+    print(
+        "timing: "
+        f"retrieval_time_ms={response.timing.get('retrieval_time_ms', 0.0):.1f}, "
+        f"prompt_build_time_ms={response.timing.get('prompt_build_time_ms', 0.0):.1f}, "
+        f"llm_time_ms={response.timing.get('llm_time_ms', 0.0):.1f}, "
+        f"total_time_ms={response.timing.get('total_time_ms', 0.0):.1f}\n"
     )
     print(render_ask_response(response))
     return 0
@@ -118,6 +156,14 @@ def cmd_embed(args: argparse.Namespace) -> int:
         print(f"Index not found: {DEFAULT_CONFIG.db_path}. Run ingest first.", file=sys.stderr)
         return 2
     try:
+        ollama_status = ensure_ollama_running(
+            DEFAULT_CONFIG.ollama_base_url,
+            auto_start=args.auto_start_ollama,
+            log_path=DEFAULT_CONFIG.index_dir / "ollama.log",
+        )
+        if not ollama_status.reachable:
+            print(f"Embedding failed: {ollama_status.message}", file=sys.stderr)
+            return 2
         stats = build_embeddings(DEFAULT_CONFIG)
     except EmbeddingError as exc:
         print(f"Embedding failed: {exc}", file=sys.stderr)
@@ -172,6 +218,8 @@ def build_parser() -> argparse.ArgumentParser:
     ingest_parser.set_defaults(func=cmd_ingest)
 
     embed_parser = subparsers.add_parser("embed", help="Build local Ollama embeddings for indexed chunks.")
+    embed_parser.add_argument("--auto-start-ollama", dest="auto_start_ollama", action="store_true", default=True, help="Try to start `ollama serve` if Ollama is not reachable. Default: enabled.")
+    embed_parser.add_argument("--no-auto-start-ollama", dest="auto_start_ollama", action="store_false", help="Do not try to start Ollama automatically.")
     embed_parser.set_defaults(func=cmd_embed)
 
     search_parser = subparsers.add_parser("search", help="Search the local index.")
@@ -201,6 +249,9 @@ def build_parser() -> argparse.ArgumentParser:
         default=0,
         help="Maximum results per file. 0 disables the cap.",
     )
+    search_parser.add_argument("--open-first", action="store_true", help="Open the top result file with macOS `open`.")
+    search_parser.add_argument("--auto-start-ollama", dest="auto_start_ollama", action="store_true", default=True, help="Try to start `ollama serve` for semantic search if needed. Default: enabled.")
+    search_parser.add_argument("--no-auto-start-ollama", dest="auto_start_ollama", action="store_false", help="Do not try to start Ollama automatically.")
     search_parser.set_defaults(func=cmd_search)
 
     ask_parser = subparsers.add_parser("ask", help="Answer a question using local retrieval plus local Ollama LLM citations.")
@@ -241,6 +292,14 @@ def build_parser() -> argparse.ArgumentParser:
         default="warn",
         help="How ask handles insufficient local evidence. strict refuses, warn answers with warnings, open answers even with no local evidence. Default: warn.",
     )
+    ask_parser.add_argument(
+        "--detail",
+        choices=("concise", "standard", "detailed"),
+        default="standard",
+        help="Answer detail level. concise is short, standard is default, detailed gives a longer explanation.",
+    )
+    ask_parser.add_argument("--auto-start-ollama", dest="auto_start_ollama", action="store_true", default=True, help="Try to start `ollama serve` if Ollama is not reachable. Default: enabled.")
+    ask_parser.add_argument("--no-auto-start-ollama", dest="auto_start_ollama", action="store_false", help="Do not try to start Ollama automatically.")
     ask_parser.set_defaults(func=cmd_ask)
 
     status_parser = subparsers.add_parser("status", help="Show index statistics and recent failures.")

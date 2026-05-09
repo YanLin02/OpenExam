@@ -48,6 +48,22 @@ def test_ingest_and_search_txt(tmp_path) -> None:
     assert fts == 2
 
 
+def test_search_timing_fields_exist(tmp_path) -> None:
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    (data_dir / "timing.md").write_text("Transformer attention mechanism", encoding="utf-8")
+    config = AppConfig(index_dir=tmp_path / ".openexam", chunk_size=800, chunk_overlap=120)
+    ingest_directory(data_dir, config=config, rebuild=True)
+
+    timing: dict[str, float] = {}
+    results = search_index("Transformer", top_k=3, config=config, mode="keyword", timing=timing)
+
+    assert results
+    assert isinstance(timing["retrieval_time_ms"], float)
+    assert isinstance(timing["ranking_time_ms"], float)
+    assert isinstance(timing["total_time_ms"], float)
+
+
 def test_fuzzy_search_supplements_fts(tmp_path) -> None:
     data_dir = tmp_path / "data"
     data_dir.mkdir()

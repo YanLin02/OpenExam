@@ -16,6 +16,7 @@ from openexam.ask import (
     format_source,
     ask_question,
     ollama_chat,
+    num_predict_for_detail,
     render_ask_response,
 )
 from openexam.config import AppConfig
@@ -38,6 +39,14 @@ def make_result(index: int = 1) -> SearchResult:
         score=90.0,
         mode="hybrid",
     )
+
+
+def fake_ollama_ready(*args, **kwargs):
+    class Status:
+        reachable = True
+        message = "ok"
+
+    return Status()
 
 
 def test_build_ask_prompt_limits_llm_to_chunks() -> None:
@@ -84,13 +93,14 @@ def test_no_results_warn_calls_llm_without_fake_sources(monkeypatch, tmp_path) -
     def fake_search(*args, **kwargs):
         return []
 
-    def fake_chat(prompt, config, model=None):
+    def fake_chat(prompt, config, model=None, num_predict=1024):
         nonlocal called
         called = True
         assert "资料依据状态：none" in prompt
         return "没有本地依据时，只能给出通用解释。"
 
     monkeypatch.setattr("openexam.ask.search_index", fake_search)
+    monkeypatch.setattr("openexam.ask.ensure_ollama_running", fake_ollama_ready)
     monkeypatch.setattr("openexam.ask.ollama_chat", fake_chat)
     response = ask_question("一个本地资料中不存在的随机问题", config=AppConfig(index_dir=tmp_path / ".openexam"))
     rendered = render_ask_response(response)
@@ -107,11 +117,12 @@ def test_ask_calls_search_then_llm(monkeypatch, tmp_path) -> None:
     def fake_search(*args, **kwargs):
         return [make_result()]
 
-    def fake_chat(prompt, config, model=None):
+    def fake_chat(prompt, config, model=None, num_predict=1024):
         assert "检索片段" in prompt
         return "自注意力机制用于建模输入不同部分之间的相关性。[1]"
 
     monkeypatch.setattr("openexam.ask.search_index", fake_search)
+    monkeypatch.setattr("openexam.ask.ensure_ollama_running", fake_ollama_ready)
     monkeypatch.setattr("openexam.ask.ollama_chat", fake_chat)
     response = ask_question("注意力机制的作用是什么？", config=AppConfig(index_dir=tmp_path / ".openexam"))
     rendered = render_ask_response(response)
@@ -136,6 +147,7 @@ def test_partial_evidence_warn_calls_llm_with_warning(monkeypatch, tmp_path) -> 
         return "本地资料只支持 Transformer 注意力部分；局部连接和权值共享需要通用知识补充。"
 
     monkeypatch.setattr("openexam.ask.search_index", fake_search)
+    monkeypatch.setattr("openexam.ask.ensure_ollama_running", fake_ollama_ready)
     monkeypatch.setattr("openexam.ask.ollama_chat", fake_chat)
     response = ask_question(
         "卷积神经网络的局部连接和权值共享是什么意思",
@@ -180,11 +192,12 @@ def test_open_policy_no_results_calls_llm(monkeypatch, tmp_path) -> None:
     def fake_search(*args, **kwargs):
         return []
 
-    def fake_chat(prompt, config, model=None):
+    def fake_chat(prompt, config, model=None, num_predict=1024):
         assert "资料依据状态：none" in prompt
         return "这是通用知识解释。"
 
     monkeypatch.setattr("openexam.ask.search_index", fake_search)
+    monkeypatch.setattr("openexam.ask.ensure_ollama_running", fake_ollama_ready)
     monkeypatch.setattr("openexam.ask.ollama_chat", fake_chat)
     response = ask_question(
         "一个本地资料中不存在的随机问题",
@@ -206,6 +219,31 @@ def test_question_key_phrase_support() -> None:
     assert not context_supports_question("卷积神经网络的局部连接和权值共享是什么意思", [make_result()])
     assert evidence_status_for_question("卷积神经网络的局部连接和权值共享是什么意思", [make_result()])[0] == "partial"
     assert evidence_status_for_question("一个本地资料中不存在的随机问题", [])[0] == "none"
+
+
+def test_detail_controls_prompt_and_num_predict(monkeypatch, tmp_path) -> None:
+    seen: dict[str, object] = {}
+
+    def fake_search(*args, **kwargs):
+        return [make_result()]
+
+    def fake_chat(prompt, config, model=None, num_predict=1024):
+        seen["prompt"] = prompt
+        seen["num_predict"] = num_predict
+        return "简短回答。[1]"
+
+    monkeypatch.setattr("openexam.ask.search_index", fake_search)
+    monkeypatch.setattr("openexam.ask.ensure_ollama_running", fake_ollama_ready)
+    monkeypatch.setattr("openexam.ask.ollama_chat", fake_chat)
+
+    response = ask_question("注意力机制的作用是什么？", config=AppConfig(index_dir=tmp_path / ".openexam"), detail="concise")
+
+    assert response.timing["retrieval_time_ms"] >= 0
+    assert response.timing["llm_time_ms"] >= 0
+    assert response.detail == "concise"
+    assert "输出详细程度：concise" in str(seen["prompt"])
+    assert seen["num_predict"] == 512
+    assert num_predict_for_detail("detailed") == 2048
 
 
 def test_ollama_unavailable_error(monkeypatch, tmp_path) -> None:

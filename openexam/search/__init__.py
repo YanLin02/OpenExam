@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 import re
+import time
 from typing import Literal
 
 from openexam.config import DEFAULT_CONFIG, AppConfig
@@ -73,7 +74,9 @@ def search_index(
     scope: SearchScope = "all",
     prefer: SourcePreference = "none",
     per_file_cap: int = 0,
+    timing: dict[str, float] | None = None,
 ) -> list[SearchResult]:
+    total_start = time.perf_counter()
     if mode not in {"keyword", "fuzzy", "hybrid", "semantic"}:
         raise ValueError("mode must be one of: keyword, fuzzy, hybrid, semantic")
     if scope not in {"all", "lecture", "textbook_ocr", "other"}:
@@ -90,6 +93,7 @@ def search_index(
     conn = sqlite3.connect(config.db_path)
     conn.row_factory = sqlite3.Row
     try:
+        retrieval_start = time.perf_counter()
         fts_rows = fts_search(conn, query, config.fts_candidate_limit) if mode in {"keyword", "hybrid"} else []
         fts_rows = [row for row in fts_rows if scope_matches(row["source_type"], scope)]
         fts_raw = {int(row["chunk_db_id"]): float(row["rank"]) for row in fts_rows}
@@ -125,17 +129,23 @@ def search_index(
 
         semantic_score_map: dict[int, float] = {}
         if mode in {"semantic", "hybrid"}:
+            semantic_start = time.perf_counter()
             try:
                 semantic_score_map = semantic_scores(query, config=config, limit=config.semantic_candidate_limit)
             except EmbeddingError:
                 if mode == "semantic":
                     raise
                 semantic_score_map = {}
+            if timing is not None:
+                timing["semantic_time_ms"] = (time.perf_counter() - semantic_start) * 1000
             for chunk_db_id in semantic_score_map:
                 row = all_by_id.get(chunk_db_id)
                 if row is not None:
                     candidates.setdefault(chunk_db_id, row)
 
+        if timing is not None:
+            timing["retrieval_time_ms"] = (time.perf_counter() - retrieval_start) * 1000
+        ranking_start = time.perf_counter()
         results: list[SearchResult] = []
         for chunk_db_id, row in candidates.items():
             fts_score = fts_norm.get(chunk_db_id, 0.0)
@@ -182,6 +192,9 @@ def search_index(
                 )
             )
         results.sort(key=lambda result: result.score, reverse=True)
+        if timing is not None:
+            timing["ranking_time_ms"] = (time.perf_counter() - ranking_start) * 1000
+            timing["total_time_ms"] = (time.perf_counter() - total_start) * 1000
         if per_file_cap > 0:
             capped: list[SearchResult] = []
             counts: dict[str, int] = {}
