@@ -203,3 +203,32 @@ def update_job_from_future(job: JobRecord) -> JobRecord:
 def job_elapsed_seconds(job: JobRecord) -> float:
     end = job.finished_at if job.finished_at is not None else time.time()
     return max(0.0, end - job.created_at)
+
+
+def job_preview_prefix(kind: JobKind, job_id: str) -> str:
+    return f"{kind}-job-{job_id}"
+
+
+def is_job_collapsed(collapsed_ids: set[str], job_id: str) -> bool:
+    return job_id in collapsed_ids
+
+
+def toggle_job_collapsed(collapsed_ids: set[str], job_id: str) -> set[str]:
+    updated = set(collapsed_ids)
+    if job_id in updated:
+        updated.remove(job_id)
+    else:
+        updated.add(job_id)
+    return updated
+
+
+def remove_job_by_id(jobs: list[JobRecord], job_id: str) -> list[JobRecord]:
+    return [job for job in jobs if job.job_id != job_id]
+
+
+def close_job_by_id(jobs: list[JobRecord], job_id: str) -> list[JobRecord]:
+    for job in jobs:
+        if job.job_id == job_id and job.status == "queued" and job.future is not None:
+            job.future.cancel()
+            break
+    return remove_job_by_id(jobs, job_id)

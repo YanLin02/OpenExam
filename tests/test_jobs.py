@@ -1,17 +1,23 @@
 from __future__ import annotations
 
 import time
+from concurrent.futures import Future
 
 from openexam.ask import AskResponse
 from openexam.jobs import (
     JobRecord,
     SearchJobResult,
+    close_job_by_id,
     create_ask_executor,
     create_search_executor,
+    is_job_collapsed,
     job_elapsed_seconds,
+    job_preview_prefix,
     make_job_id,
+    remove_job_by_id,
     submit_ask_job,
     submit_search_job,
+    toggle_job_collapsed,
     update_job_from_future,
 )
 
@@ -114,3 +120,47 @@ def test_executor_max_workers_defaults_and_overrides() -> None:
     finally:
         search_executor.shutdown(wait=True)
         ask_executor.shutdown(wait=True)
+
+
+def test_job_collapsed_state_helpers() -> None:
+    job_id = "abc123"
+    collapsed: set[str] = set()
+
+    assert job_preview_prefix("ask", job_id) == "ask-job-abc123"
+    assert not is_job_collapsed(collapsed, job_id)
+
+    collapsed = toggle_job_collapsed(collapsed, job_id)
+    assert is_job_collapsed(collapsed, job_id)
+
+    collapsed = toggle_job_collapsed(collapsed, job_id)
+    assert not is_job_collapsed(collapsed, job_id)
+
+
+def test_remove_job_by_id_removes_only_target() -> None:
+    first = JobRecord(job_id="first", kind="search", input_text="q1", signature="sig1")
+    second = JobRecord(job_id="second", kind="ask", input_text="q2", signature="sig2")
+
+    remaining = remove_job_by_id([first, second], "first")
+
+    assert remaining == [second]
+
+
+def test_close_queued_job_cancels_future_and_removes_job() -> None:
+    future: Future[object] = Future()
+    job = JobRecord(job_id="queued", kind="ask", input_text="q", signature="sig", future=future)
+
+    remaining = close_job_by_id([job], "queued")
+
+    assert remaining == []
+    assert future.cancelled()
+
+
+def test_close_running_job_removes_without_force_stopping() -> None:
+    future: Future[object] = Future()
+    future.set_running_or_notify_cancel()
+    job = JobRecord(job_id="running", kind="ask", input_text="q", signature="sig", status="running", future=future)
+
+    remaining = close_job_by_id([job], "running")
+
+    assert remaining == []
+    assert future.running()

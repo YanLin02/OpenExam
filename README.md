@@ -207,24 +207,26 @@ streamlit run openexam/app.py --server.address 127.0.0.1
 
 The UI provides:
 
-- Search and Ask modes with explicit `Search` and `Clear` actions.
+- `Search` and `Ask local AI` modes with single-input task queues.
 - Compact retrieval controls for mode, scope, top-k, source preference, and per-file caps.
+- Ask controls for evidence policy, detail level, and LLM model.
 - Sidebar controls for indexing, index status, semantic status, Ollama status, and parameter help.
 - PDF page preview inside the app for results with page numbers.
 - Local file open and Finder reveal actions.
-- Cached Search and Ask results so file actions do not rerun retrieval or local LLM generation.
+- Queued Search and Ask result cards so file actions do not rerun retrieval or local LLM generation.
 - Timing information for retrieval and local generation.
 
 Browser `file://` links are not used as the primary open mechanism because browsers may block local-file navigation from a localhost page. PDF page preview inside Streamlit is the most reliable way to inspect the referenced page.
 
-### 并行搜索 / 后台提问
+### Search / Ask 队列
 
-The Streamlit UI also includes `Parallel Search` and `Parallel Ask` actions:
+The Streamlit UI keeps the main `Search` and `Ask local AI` modes, and both modes submit one input at a time into a queue:
 
-- `Parallel Search` accepts one query per line and is useful for checking several terms at once.
-- `Parallel Ask` accepts one question per line and runs questions in the background.
-- Ask tasks use one worker by default so a local LLM such as `qwen3:8b` does not compete with itself for resources.
-- If the machine has enough CPU/GPU memory, set `Ask workers` to `2` before submitting new ask tasks.
+- In `Search`, enter one query and click `搜索` to add a background search task.
+- In `Ask local AI`, enter one question and click `搜索` to add a background cited-answer task.
+- Ask tasks always use one worker, so a local LLM such as `qwen3:8b` does not compete with itself for resources.
+- Each task card can be minimized, expanded, or closed.
+- Closing a queued task attempts to cancel it. Closing a running task only hides it from the UI; it does not force-stop the background request.
 - Tasks are kept only in the current Streamlit session and are not persisted to disk or the index database.
 
 ## Privacy and Offline Use
