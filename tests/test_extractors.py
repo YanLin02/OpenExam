@@ -21,6 +21,17 @@ def test_text_extractor_preserves_paragraphs(tmp_path) -> None:
     assert "CNN" in sections[1].text
 
 
+def test_txt_extractor_preserves_paragraphs(tmp_path) -> None:
+    path = tmp_path / "notes.txt"
+    path.write_text("first paragraph\n\nsecond paragraph with CNN", encoding="utf-8")
+
+    sections = extract_text_file(path)
+
+    assert [section.paragraph_index for section in sections] == [1, 2]
+    assert sections[0].location_label == "para.1"
+    assert sections[1].location_type == "paragraph"
+
+
 def test_docx_extractor_preserves_paragraphs(tmp_path) -> None:
     docx = pytest.importorskip("docx")
     path = tmp_path / "sample.docx"
@@ -88,3 +99,20 @@ def test_damaged_pdf_is_recorded_as_failure(tmp_path) -> None:
     assert stats.scanned_files == 1
     assert stats.failed_files == 1
     assert stats.errors
+
+
+def test_empty_pdf_is_recorded_as_no_extractable_text(tmp_path) -> None:
+    fitz = pytest.importorskip("fitz")
+    path = tmp_path / "empty.pdf"
+    document = fitz.open()
+    document.new_page()
+    document.save(path)
+    document.close()
+    config = AppConfig(index_dir=tmp_path / ".openexam")
+
+    stats = ingest_directory(tmp_path, config=config, rebuild=True)
+
+    assert stats.scanned_files == 1
+    assert stats.failed_files == 1
+    assert stats.errors
+    assert "no extractable text" in stats.errors[0][1]

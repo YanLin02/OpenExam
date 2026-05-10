@@ -68,3 +68,38 @@ def test_render_pdf_page_out_of_range_has_clear_error(tmp_path) -> None:
 def test_render_pdf_page_missing_file_has_clear_error(tmp_path) -> None:
     with pytest.raises(PdfPreviewError, match="PDF file does not exist"):
         render_pdf_page(str(tmp_path / "missing.pdf"), 1)
+
+
+def test_render_pdf_page_bad_pdf_wraps_mupdf_error(tmp_path) -> None:
+    path = tmp_path / "bad.pdf"
+    path.write_bytes(b"not a pdf")
+
+    with pytest.raises(PdfPreviewError, match="PDF page preview failed. Use Open File"):
+        render_pdf_page(str(path), 1)
+
+
+def test_render_pdf_page_runtime_error_is_wrapped(tmp_path, monkeypatch) -> None:
+    path = tmp_path / "sample.pdf"
+    make_pdf(path)
+
+    class BrokenPage:
+        def get_pixmap(self, *args, **kwargs):
+            raise RuntimeError("MuPDF error: format error: No common ancestor in structure tree")
+
+    class BrokenDocument:
+        page_count = 1
+
+        def load_page(self, index):
+            return BrokenPage()
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr("openexam.pdf_preview.fitz.open", lambda *args, **kwargs: BrokenDocument())
+
+    with pytest.raises(PdfPreviewError) as exc_info:
+        render_pdf_page(str(path), 1)
+
+    message = str(exc_info.value)
+    assert "PDF page preview failed. Use Open File" in message
+    assert "MuPDF error" not in message

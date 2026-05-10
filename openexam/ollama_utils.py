@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import signal
 import shutil
 import subprocess
 import time
@@ -21,8 +23,54 @@ class OllamaStatus:
     log_path: Path | None = None
 
 
+@dataclass(frozen=True)
+class OllamaStopStatus:
+    stopped: bool
+    message: str
+    pid: int | None = None
+
+
 def _tags_url(base_url: str) -> str:
     return base_url.rstrip("/") + "/api/tags"
+
+
+def _pid_path(log_path: Path | None = None) -> Path:
+    if log_path is not None:
+        return log_path.parent / "ollama.pid"
+    return DEFAULT_CONFIG.index_dir / "ollama.pid"
+
+
+def _pid_exists(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def _pid_command(pid: int) -> str | None:
+    try:
+        result = subprocess.run(
+            ["ps", "-p", str(pid), "-o", "comm="],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=1.0,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip()
+
+
+def _is_ollama_pid(pid: int) -> bool:
+    command = _pid_command(pid)
+    if not command:
+        return True
+    return Path(command).name == "ollama"
 
 
 def is_ollama_reachable(base_url: str, timeout: float = 1.0) -> bool:
@@ -56,7 +104,7 @@ def start_ollama_server(log_path: Path | None = None) -> tuple[bool, str, Path |
     effective_log_path.parent.mkdir(parents=True, exist_ok=True)
     log_file = effective_log_path.open("ab")
     try:
-        subprocess.Popen(
+        process = subprocess.Popen(
             [executable, "serve"],
             stdout=log_file,
             stderr=subprocess.STDOUT,
@@ -66,7 +114,54 @@ def start_ollama_server(log_path: Path | None = None) -> tuple[bool, str, Path |
         log_file.close()
         return False, f"Failed to start Ollama: {exc}", effective_log_path
     log_file.close()
+    _pid_path(effective_log_path).write_text(str(process.pid), encoding="utf-8")
     return True, f"Started Ollama with: ollama serve. Log: {effective_log_path}", effective_log_path
+
+
+def stop_ollama_server(log_path: Path | None = None, wait_seconds: float = 3.0, poll_interval: float = 0.1) -> OllamaStopStatus:
+    pid_path = _pid_path(log_path)
+    if not pid_path.exists():
+        return OllamaStopStatus(
+            False,
+            "OpenExam did not start this Ollama process. Stop it manually or use brew services stop ollama.",
+        )
+    try:
+        pid = int(pid_path.read_text(encoding="utf-8").strip())
+    except ValueError:
+        pid_path.unlink(missing_ok=True)
+        return OllamaStopStatus(False, "OpenExam Ollama pid file was invalid and has been removed.")
+
+    if not _pid_exists(pid):
+        pid_path.unlink(missing_ok=True)
+        return OllamaStopStatus(False, "OpenExam Ollama pid file was stale and has been removed.", pid)
+    if not _is_ollama_pid(pid):
+        pid_path.unlink(missing_ok=True)
+        return OllamaStopStatus(False, "OpenExam Ollama pid did not match an Ollama process; pid file removed.", pid)
+
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        pid_path.unlink(missing_ok=True)
+        return OllamaStopStatus(False, "Ollama process was already stopped.", pid)
+    except PermissionError as exc:
+        return OllamaStopStatus(False, f"Permission denied while stopping Ollama: {exc}", pid)
+
+    deadline = time.perf_counter() + wait_seconds
+    while time.perf_counter() < deadline:
+        if not _pid_exists(pid):
+            pid_path.unlink(missing_ok=True)
+            return OllamaStopStatus(True, "Stopped OpenExam-started Ollama.", pid)
+        time.sleep(poll_interval)
+
+    try:
+        os.kill(pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pid_path.unlink(missing_ok=True)
+        return OllamaStopStatus(True, "Stopped OpenExam-started Ollama.", pid)
+    except PermissionError as exc:
+        return OllamaStopStatus(False, f"Permission denied while force-stopping Ollama: {exc}", pid)
+    pid_path.unlink(missing_ok=True)
+    return OllamaStopStatus(True, "Force-stopped OpenExam-started Ollama.", pid)
 
 
 def ensure_ollama_running(
