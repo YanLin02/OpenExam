@@ -209,6 +209,14 @@ def job_preview_prefix(kind: JobKind, job_id: str) -> str:
     return f"{kind}-job-{job_id}"
 
 
+def queue_input_key(kind: JobKind) -> str:
+    return f"{kind}_queue_input"
+
+
+def jobs_in_submission_order(jobs: list[JobRecord]) -> list[JobRecord]:
+    return list(jobs)
+
+
 def is_job_collapsed(collapsed_ids: set[str], job_id: str) -> bool:
     return job_id in collapsed_ids
 

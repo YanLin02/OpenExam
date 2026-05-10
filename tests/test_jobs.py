@@ -13,7 +13,9 @@ from openexam.jobs import (
     is_job_collapsed,
     job_elapsed_seconds,
     job_preview_prefix,
+    jobs_in_submission_order,
     make_job_id,
+    queue_input_key,
     remove_job_by_id,
     submit_ask_job,
     submit_search_job,
@@ -134,6 +136,21 @@ def test_job_collapsed_state_helpers() -> None:
 
     collapsed = toggle_job_collapsed(collapsed, job_id)
     assert not is_job_collapsed(collapsed, job_id)
+
+
+def test_queue_input_keys_are_mode_specific() -> None:
+    assert queue_input_key("search") == "search_queue_input"
+    assert queue_input_key("ask") == "ask_queue_input"
+    assert queue_input_key("search") != queue_input_key("ask")
+
+
+def test_jobs_in_submission_order_does_not_reverse() -> None:
+    first = JobRecord(job_id="first", kind="search", input_text="first query", signature="sig1")
+    second = JobRecord(job_id="second", kind="search", input_text="second query", signature="sig2")
+
+    ordered = jobs_in_submission_order([first, second])
+
+    assert ordered == [first, second]
 
 
 def test_remove_job_by_id_removes_only_target() -> None:

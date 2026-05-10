@@ -29,6 +29,8 @@ from openexam.jobs import (
     is_job_collapsed,
     job_elapsed_seconds,
     job_preview_prefix,
+    jobs_in_submission_order,
+    queue_input_key,
     submit_ask_job,
     submit_search_job,
     toggle_job_collapsed,
@@ -337,6 +339,17 @@ def update_jobs(jobs: list[JobRecord]) -> None:
         update_job_from_future(job)
 
 
+def clear_pending_queue_input(kind: str) -> None:
+    input_key = queue_input_key(kind)
+    pending_key = f"{input_key}:clear_pending"
+    if st.session_state.pop(pending_key, False):
+        st.session_state[input_key] = ""
+
+
+def mark_queue_input_for_clear(kind: str) -> None:
+    st.session_state[f"{queue_input_key(kind)}:clear_pending"] = True
+
+
 def render_job_card(job: JobRecord, result_key_prefix: str) -> None:
     collapsed = is_job_collapsed(collapsed_jobs(), job.job_id)
     preview_prefix = job_preview_prefix(job.kind, job.job_id)
@@ -419,7 +432,7 @@ def render_job_queue(kind: str) -> None:
     st.subheader("任务队列")
     if kind == "ask":
         st.caption("Ask local AI 固定单 worker 串行执行；关闭 running 卡片只会从 UI 隐藏，不会强制终止本地 LLM 请求。")
-    for job in reversed(jobs):
+    for job in jobs_in_submission_order(jobs):
         render_job_card(job, result_key_prefix=job_preview_prefix(kind, job.job_id))
 
 
@@ -427,13 +440,20 @@ def render_controls() -> tuple[str, str, str, int, str, int, str, str, str, bool
     top_cols = st.columns([2, 2, 2, 1])
     action = top_cols[0].radio("Action", options=["Search", "Ask local AI"], horizontal=True)
     is_ask = action == "Ask local AI"
+    kind = "ask" if is_ask else "search"
     mode = top_cols[1].selectbox("Mode", options=["hybrid", "keyword", "fuzzy", "semantic"], index=0)
     scope = top_cols[2].selectbox("Scope", options=["all", "lecture", "textbook_ocr", "other"], index=0)
     top_default = DEFAULT_CONFIG.llm_context_top_k if is_ask else 10
     top_k = top_cols[3].number_input("Top-k", min_value=1, max_value=50, value=top_default, step=1)
 
     query_cols = st.columns([8, 1.2, 1.2, 1.2])
-    query = query_cols[0].text_input("搜索 / 问题", value="", label_visibility="collapsed", placeholder="输入关键词、术语或问题")
+    clear_pending_queue_input(kind)
+    query = query_cols[0].text_input(
+        "搜索 / 问题",
+        key=queue_input_key(kind),
+        label_visibility="collapsed",
+        placeholder="输入关键词、术语或问题",
+    )
     submit_clicked = query_cols[1].button("搜索", type="primary", use_container_width=True)
     clear_clicked = query_cols[2].button("清空队列", use_container_width=True)
     refresh_clicked = query_cols[3].button("刷新状态", use_container_width=True)
@@ -477,13 +497,13 @@ def render_controls() -> tuple[str, str, str, int, str, int, str, str, str, bool
     )
 
 
-def submit_search_queue_job(query: str, mode: str, scope: str, prefer: str, per_file_cap: int, top_k: int) -> None:
+def submit_search_queue_job(query: str, mode: str, scope: str, prefer: str, per_file_cap: int, top_k: int) -> bool:
     if not query.strip():
         st.warning("请输入搜索内容。")
-        return
+        return False
     if not DEFAULT_CONFIG.db_path.exists():
         st.warning("还没有索引，请先建立索引。")
-        return
+        return False
     signature = build_search_signature(
         query=query,
         mode=mode,
@@ -505,6 +525,7 @@ def submit_search_queue_job(query: str, mode: str, scope: str, prefer: str, per_
     )
     session_jobs("search_jobs").append(job)
     st.success("已提交搜索任务。")
+    return True
 
 
 def submit_ask_queue_job(
@@ -517,13 +538,13 @@ def submit_ask_queue_job(
     llm_model: str,
     evidence_policy: str,
     detail: str,
-) -> None:
+) -> bool:
     if not question.strip():
         st.warning("请输入问题。")
-        return
+        return False
     if not DEFAULT_CONFIG.db_path.exists():
         st.warning("还没有索引，请先建立索引。")
-        return
+        return False
     signature = build_ask_signature(
         query=question,
         mode=mode,
@@ -551,6 +572,7 @@ def submit_ask_queue_job(
     )
     session_jobs("ask_jobs").append(job)
     st.success("已提交 Ask 任务。")
+    return True
 
 
 def main() -> None:
@@ -579,9 +601,13 @@ def main() -> None:
         clear_jobs(kind)
         st.info("已清空队列。")
     elif submit_clicked and kind == "search":
-        submit_search_queue_job(query, mode, scope, prefer, per_file_cap, top_k)
+        if submit_search_queue_job(query, mode, scope, prefer, per_file_cap, top_k):
+            mark_queue_input_for_clear(kind)
+            rerun_app()
     elif submit_clicked:
-        submit_ask_queue_job(query, mode, scope, prefer, per_file_cap, top_k, llm_model, evidence_policy, detail)
+        if submit_ask_queue_job(query, mode, scope, prefer, per_file_cap, top_k, llm_model, evidence_policy, detail):
+            mark_queue_input_for_clear(kind)
+            rerun_app()
     elif refresh_clicked:
         update_jobs(session_jobs("ask_jobs" if kind == "ask" else "search_jobs"))
         st.info("任务状态已刷新。")
