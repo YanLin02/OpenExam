@@ -37,7 +37,7 @@ from openexam.jobs import (
     update_job_from_future,
 )
 from openexam.models import SearchResult
-from openexam.ollama_utils import choose_default_llm_model, ensure_ollama_running, list_ollama_models
+from openexam.ollama_utils import choose_default_llm_model, ensure_ollama_running, list_ollama_models, stop_ollama_server
 from openexam.pdf_preview import PdfPreviewError, render_pdf_page
 from openexam.ui_state import (
     build_ask_signature,
@@ -116,13 +116,21 @@ def render_index_status() -> None:
 
 def render_ollama_status() -> None:
     st.sidebar.subheader("Ollama")
-    col1, col2 = st.sidebar.columns(2)
+    col1, col2, col3 = st.sidebar.columns(3)
     refresh = col1.button("Refresh", use_container_width=True)
     start = col2.button("Start", use_container_width=True)
+    stop = col3.button("Stop", use_container_width=True)
+    log_path = DEFAULT_CONFIG.index_dir / "ollama.log"
+    if stop:
+        stop_status = stop_ollama_server(log_path=log_path)
+        if stop_status.stopped:
+            st.sidebar.success(stop_status.message)
+        else:
+            st.sidebar.warning(stop_status.message)
     if start:
-        status = ensure_ollama_running(DEFAULT_CONFIG.ollama_base_url, auto_start=True, log_path=DEFAULT_CONFIG.index_dir / "ollama.log")
+        status = ensure_ollama_running(DEFAULT_CONFIG.ollama_base_url, auto_start=True, log_path=log_path)
     else:
-        status = ensure_ollama_running(DEFAULT_CONFIG.ollama_base_url, auto_start=False, log_path=DEFAULT_CONFIG.index_dir / "ollama.log")
+        status = ensure_ollama_running(DEFAULT_CONFIG.ollama_base_url, auto_start=False, log_path=log_path)
     model_preview = status.models[:3]
     st.sidebar.caption(compact_ollama_status(status.reachable, model_preview))
     st.sidebar.caption(status.message)
@@ -209,9 +217,13 @@ def rerun_app() -> None:
         st.experimental_rerun()
 
 
+def should_show_pdf_preview(path: str, page_number: int | None) -> bool:
+    return Path(path).suffix.lower() == ".pdf" and page_number is not None
+
+
 def render_file_actions(path: str, page_number: int | None, key_prefix: str, chunk_db_id: int) -> None:
     target = Path(path)
-    is_pdf_page = target.suffix.lower() == ".pdf" and page_number is not None
+    is_pdf_page = should_show_pdf_preview(path, page_number)
     action_cols = st.columns(3 if is_pdf_page else 2)
     if is_pdf_page:
         preview_key = preview_state_key(key_prefix, chunk_db_id, path, page_number)

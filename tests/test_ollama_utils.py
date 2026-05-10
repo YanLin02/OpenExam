@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from io import BytesIO
 
-from openexam.ollama_utils import choose_default_llm_model, ensure_ollama_running, is_ollama_reachable, list_ollama_models
+from openexam.ollama_utils import choose_default_llm_model, ensure_ollama_running, is_ollama_reachable, list_ollama_models, stop_ollama_server
 
 
 class FakeResponse(BytesIO):
@@ -43,6 +43,7 @@ def test_auto_start_ollama_uses_mock_subprocess(monkeypatch, tmp_path) -> None:
     class FakePopen:
         def __init__(self, *args, **kwargs):
             calls["popen"] += 1
+            self.pid = 12345
 
     monkeypatch.setattr("openexam.ollama_utils.is_ollama_reachable", fake_reachable)
     monkeypatch.setattr("openexam.ollama_utils.list_ollama_models", fake_models)
@@ -55,3 +56,23 @@ def test_auto_start_ollama_uses_mock_subprocess(monkeypatch, tmp_path) -> None:
     assert status.started
     assert status.models == ["qwen3:8b"]
     assert calls["popen"] == 1
+    assert (tmp_path / "ollama.pid").read_text(encoding="utf-8") == "12345"
+
+
+def test_stop_ollama_without_openexam_pid_file_is_conservative(tmp_path) -> None:
+    status = stop_ollama_server(log_path=tmp_path / "ollama.log")
+
+    assert not status.stopped
+    assert "did not start" in status.message
+
+
+def test_stop_ollama_removes_stale_pid_file(monkeypatch, tmp_path) -> None:
+    pid_path = tmp_path / "ollama.pid"
+    pid_path.write_text("999999", encoding="utf-8")
+    monkeypatch.setattr("openexam.ollama_utils._pid_exists", lambda pid: False)
+
+    status = stop_ollama_server(log_path=tmp_path / "ollama.log")
+
+    assert not status.stopped
+    assert "stale" in status.message
+    assert not pid_path.exists()
