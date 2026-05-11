@@ -193,6 +193,10 @@ python -m openexam solve "design a CNN for handwritten digit recognition" --prob
 
 `solve` keeps retrieval local and reuses the same evidence controls as `ask`. Design questions use a structured template before calling the local LLM, so answers are organized as exam-ready drafts with sections such as task objective, input/output, model structure, loss function, optimization, overfitting controls, and metrics. If local evidence is insufficient, the answer follows `--evidence-policy` and must mark that limitation instead of inventing sources.
 
+Derivation questions use a visible "goal, symbols, steps, conclusion" style template. The answer is forced into sections such as known conditions, key formulas, derivation steps, final conclusion, and applicability instead of a free-form explanation.
+
+Comparison questions use an "objects, common points, differences, pros/cons, suitable scenarios, exam summary" template. The answer includes task-specific comparison dimensions such as model structure, optimizer stability, loss behavior, regularization mechanism, or metric interpretation.
+
 The output is a study and exam-answer draft. Adjust the level of detail and section emphasis to match the exact question wording.
 
 ## Semantic Search

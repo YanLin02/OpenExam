@@ -15,7 +15,14 @@ from openexam.ask import (
     format_source,
 )
 from openexam.calculators.parser import CalculationAnswer, solve_calculation_question
+from openexam.compare_templates import CompareTaskType, build_compare_answer_plan, build_compare_prompt, classify_compare_task
 from openexam.config import AppConfig, DEFAULT_CONFIG
+from openexam.derivation_templates import (
+    DerivationTaskType,
+    build_derivation_answer_plan,
+    build_derivation_prompt,
+    classify_derivation_task,
+)
 from openexam.design_templates import DesignTaskType, build_design_answer_plan, build_design_prompt, classify_design_task
 from openexam.problem_types import ProblemType, classify_problem
 from openexam.search import SearchMode, search_index
@@ -46,6 +53,11 @@ class SolveResponse:
     calculation_answer: CalculationAnswer | None = None
     design_task_type: DesignTaskType | None = None
     design_sections: list[str] | None = None
+    derivation_task_type: DerivationTaskType | None = None
+    derivation_sections: list[str] | None = None
+    compare_task_type: CompareTaskType | None = None
+    compare_sections: list[str] | None = None
+    comparison_dimensions: list[str] | None = None
     fallback_note: str | None = None
 
 
@@ -174,6 +186,73 @@ def solve_question(
             design_sections=design_plan.sections,
         )
 
+    if problem_type == ProblemType.DERIVATION:
+        derivation_task_type = classify_derivation_task(question)
+        derivation_plan = build_derivation_answer_plan(question, derivation_task_type)
+        enhanced_question = build_derivation_prompt(
+            question,
+            derivation_plan,
+            retrieved_context="OpenExam Ask 会在下一步检索本地片段并附带来源。",
+            evidence_status="unknown",
+            detail=detail,
+        )
+        ask_response = ask_question(
+            enhanced_question,
+            config=config,
+            mode=options.search_mode,
+            scope=options.scope,
+            prefer=options.prefer,
+            per_file_cap=options.per_file_cap,
+            top_k=options.top_k,
+            llm_model=options.llm_model,
+            evidence_policy=evidence_policy,
+            detail=detail,
+            auto_start_ollama=options.auto_start_ollama,
+        )
+        return SolveResponse(
+            question=question,
+            problem_type=problem_type,
+            strategy=derivation_plan.guidance,
+            ask_response=ask_response,
+            requested_mode=mode.value if isinstance(mode, ProblemType) else mode,
+            derivation_task_type=derivation_task_type,
+            derivation_sections=derivation_plan.sections,
+        )
+
+    if problem_type == ProblemType.COMPARE:
+        compare_task_type = classify_compare_task(question)
+        compare_plan = build_compare_answer_plan(question, compare_task_type)
+        enhanced_question = build_compare_prompt(
+            question,
+            compare_plan,
+            retrieved_context="OpenExam Ask 会在下一步检索本地片段并附带来源。",
+            evidence_status="unknown",
+            detail=detail,
+        )
+        ask_response = ask_question(
+            enhanced_question,
+            config=config,
+            mode=options.search_mode,
+            scope=options.scope,
+            prefer=options.prefer,
+            per_file_cap=options.per_file_cap,
+            top_k=options.top_k,
+            llm_model=options.llm_model,
+            evidence_policy=evidence_policy,
+            detail=detail,
+            auto_start_ollama=options.auto_start_ollama,
+        )
+        return SolveResponse(
+            question=question,
+            problem_type=problem_type,
+            strategy=compare_plan.guidance,
+            ask_response=ask_response,
+            requested_mode=mode.value if isinstance(mode, ProblemType) else mode,
+            compare_task_type=compare_task_type,
+            compare_sections=compare_plan.sections,
+            comparison_dimensions=compare_plan.comparison_dimensions,
+        )
+
     ask_response = ask_question(
         question,
         config=config,
@@ -287,6 +366,30 @@ def render_solve_response(response: SolveResponse) -> str:
             f"题型：\n{response.problem_type.value}\n\n"
             f"设计任务类型：\n{response.design_task_type.value}\n\n"
             f"解题策略：\n{response.strategy}\n\n"
+            f"答题结构：\n{sections}\n\n"
+            f"答案：\n{_solve_answer_text(ask_response)}\n\n"
+            f"依据：\n{evidence}\n\n"
+            f"来源：\n{sources}"
+        )
+    if response.problem_type == ProblemType.DERIVATION and response.derivation_task_type is not None:
+        sections = "\n".join(f"{index}. {section}" for index, section in enumerate(response.derivation_sections or [], start=1))
+        return (
+            f"题型：\n{response.problem_type.value}\n\n"
+            f"推导任务类型：\n{response.derivation_task_type.value}\n\n"
+            f"解题策略：\n{response.strategy}\n\n"
+            f"推导结构：\n{sections}\n\n"
+            f"答案：\n{_solve_answer_text(ask_response)}\n\n"
+            f"依据：\n{evidence}\n\n"
+            f"来源：\n{sources}"
+        )
+    if response.problem_type == ProblemType.COMPARE and response.compare_task_type is not None:
+        sections = "\n".join(f"{index}. {section}" for index, section in enumerate(response.compare_sections or [], start=1))
+        dimensions = "\n".join(f"- {dimension}" for dimension in response.comparison_dimensions or [])
+        return (
+            f"题型：\n{response.problem_type.value}\n\n"
+            f"对比任务类型：\n{response.compare_task_type.value}\n\n"
+            f"解题策略：\n{response.strategy}\n\n"
+            f"比较维度：\n{dimensions}\n\n"
             f"答题结构：\n{sections}\n\n"
             f"答案：\n{_solve_answer_text(ask_response)}\n\n"
             f"依据：\n{evidence}\n\n"
