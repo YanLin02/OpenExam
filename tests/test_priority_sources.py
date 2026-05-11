@@ -7,6 +7,7 @@ from openexam.config import AppConfig
 from openexam.db import connect
 from openexam.models import SearchResult
 from openexam.priority_sources import (
+    default_priority_source_config,
     find_indexed_answer_bank_sources,
     is_heading_only_answer_bank_chunk,
     is_exam_answer_bank_path,
@@ -37,30 +38,35 @@ def make_result(chunk_db_id: int, path: str) -> SearchResult:
 
 
 def test_exam_answer_bank_path_detection() -> None:
-    assert is_exam_answer_bank_path("/data/深度学习简答题_开卷检索版.md")
-    assert is_exam_answer_bank_path("/data/近五年真题.md")
-    assert is_exam_answer_bank_path("/data/《深度学习》附录名词术语详解.pdf")
-    assert is_exam_answer_bank_path("/data/answer_bank/易考补充.md")
-    assert is_exam_answer_bank_path("/data/exam_answer_bank/名词解释补充.md")
-    assert is_exam_answer_bank_path("/data/priority_sources/简答题补充.md")
-    assert is_exam_answer_bank_path("/data/易考/Transformer重点.md")
-    assert is_exam_answer_bank_path("/data/重点/名词解释.md")
-    assert not is_exam_answer_bank_path("/data/Chapter+2-CNN.pdf")
-    assert priority_source_label("/data/深度学习简答题_开卷检索版.md") == "short_answer_bank"
-    assert priority_source_label("/data/近五年真题.md") == "past_exam_bank"
-    assert priority_source_label("/data/《深度学习》附录名词术语详解.pdf") == "terminology_bank"
-    assert priority_source_label("/data/answer_bank/易考补充.md") == "directory_answer_bank"
-    assert priority_source_label("/data/exam_answer_bank/名词解释补充.md") == "directory_answer_bank"
-    assert priority_source_label("/data/priority_sources/简答题补充.md") == "directory_answer_bank"
-    assert priority_source_label("/data/易考/Transformer重点.md") == "exam_focus_bank"
-    assert priority_source_label("/data/重点/名词解释.md") == "exam_focus_bank"
+    priority_config = default_priority_source_config()
+
+    assert not is_exam_answer_bank_path("/data/深度学习简答题_开卷检索版.md", priority_config)
+    assert not is_exam_answer_bank_path("/data/近五年真题.md", priority_config)
+    assert not is_exam_answer_bank_path("/data/《深度学习》附录名词术语详解.pdf", priority_config)
+    assert is_exam_answer_bank_path("/data/answer_bank/深度学习简答题_开卷检索版.md", priority_config)
+    assert is_exam_answer_bank_path("/data/answer_bank/近五年真题.md", priority_config)
+    assert is_exam_answer_bank_path("/data/answer_bank/易考补充.md", priority_config)
+    assert is_exam_answer_bank_path("/data/exam_answer_bank/名词解释补充.md", priority_config)
+    assert is_exam_answer_bank_path("/data/priority_sources/简答题补充.md", priority_config)
+    assert is_exam_answer_bank_path("/data/易考/Transformer重点.md", priority_config)
+    assert is_exam_answer_bank_path("/data/重点/名词解释.md", priority_config)
+    assert is_exam_answer_bank_path("/data/答案库/名词解释.md", priority_config)
+    assert not is_exam_answer_bank_path("/data/Chapter+2-CNN.pdf", priority_config)
+    assert priority_source_label("/data/深度学习简答题_开卷检索版.md", priority_config) is None
+    assert priority_source_label("/data/近五年真题.md", priority_config) is None
+    assert priority_source_label("/data/answer_bank/foo.md", priority_config) == "directory_answer_bank"
+    assert priority_source_label("/data/exam_answer_bank/名词解释补充.md", priority_config) == "directory_answer_bank"
+    assert priority_source_label("/data/priority_sources/简答题补充.md", priority_config) == "directory_answer_bank"
+    assert priority_source_label("/data/易考/foo.md", priority_config) == "exam_focus_bank"
+    assert priority_source_label("/data/重点/名词解释.md", priority_config) == "exam_focus_bank"
+    assert priority_source_label("/data/答案库/名词解释.md", priority_config) == "directory_answer_bank"
 
 
 def test_merge_priority_results_orders_answer_bank_first() -> None:
     regular_1 = make_result(1, "/data/Chapter+2-CNN.pdf")
-    priority_1 = make_result(2, "/data/近五年真题.md")
+    priority_1 = make_result(2, "/data/answer_bank/近五年真题.md")
     regular_2 = make_result(3, "/data/Chapter+8.pdf")
-    priority_2 = make_result(4, "/data/深度学习简答题_开卷检索版.md")
+    priority_2 = make_result(4, "/data/易考/深度学习简答题_开卷检索版.md")
 
     merged = merge_priority_results([regular_1, priority_1, regular_2, priority_2], top_k=4, priority_enabled=True)
 
@@ -68,8 +74,8 @@ def test_merge_priority_results_orders_answer_bank_first() -> None:
 
 
 def test_merge_priority_results_preserves_original_order_and_dedupes() -> None:
-    priority_1 = make_result(1, "/data/近五年真题.md")
-    priority_2 = make_result(2, "/data/深度学习简答题_开卷检索版.md")
+    priority_1 = make_result(1, "/data/answer_bank/近五年真题.md")
+    priority_2 = make_result(2, "/data/重点/深度学习简答题_开卷检索版.md")
     duplicate = priority_1.model_copy()
 
     merged = merge_priority_results([priority_1, priority_2, duplicate], top_k=5, priority_enabled=True)
@@ -125,9 +131,9 @@ def test_heading_only_answer_bank_chunk_detection() -> None:
 
 
 def test_merge_priority_results_skips_heading_only_priority_chunk() -> None:
-    heading = make_result(1, "/data/近五年真题.md")
+    heading = make_result(1, "/data/answer_bank/近五年真题.md")
     heading.text = "### 5．请简述 GAN 的训练过程。"
-    answer = make_result(2, "/data/深度学习简答题_开卷检索版.md")
+    answer = make_result(2, "/data/answer_bank/深度学习简答题_开卷检索版.md")
     answer.text = "### 5．请简述 GAN 的训练过程。\n\nGAN 由生成器和判别器组成。"
     regular = make_result(3, "/data/Chapter+2-CNN.pdf")
 
@@ -151,6 +157,10 @@ def test_find_indexed_answer_bank_sources(tmp_path: Path) -> None:
         )
         conn.execute(
             "INSERT INTO documents(path, filename, ext, status, source_type) VALUES (?, ?, ?, ?, ?)",
+            ("/data/易考/Transformer重点.md", "Transformer重点.md", ".md", "indexed", "other"),
+        )
+        conn.execute(
+            "INSERT INTO documents(path, filename, ext, status, source_type) VALUES (?, ?, ?, ?, ?)",
             ("/data/Chapter+2-CNN.pdf", "Chapter+2-CNN.pdf", ".pdf", "indexed", "lecture"),
         )
         conn.commit()
@@ -159,7 +169,7 @@ def test_find_indexed_answer_bank_sources(tmp_path: Path) -> None:
 
     assert set(find_indexed_answer_bank_sources(config)) == {
         "易考补充.md [directory_answer_bank]",
-        "近五年真题.md [past_exam_bank]",
+        "Transformer重点.md [exam_focus_bank]",
     }
 
 
@@ -169,7 +179,7 @@ def test_load_priority_source_config_defaults_when_missing(tmp_path: Path) -> No
     priority_config = load_priority_source_config(config)
 
     assert "answer_bank" in priority_config.answer_bank_dirs
-    assert "近五年真题" in priority_config.priority_patterns
+    assert priority_config.priority_patterns == ()
     assert priority_config.warnings == ()
 
 
@@ -180,11 +190,12 @@ def test_load_priority_source_config_merges_user_rules(tmp_path: Path) -> None:
         """
         {
           "answer_bank_dirs": ["我的答案库"],
-          "priority_patterns": ["我的重点整理", "考前补充"],
+          "priority_patterns": ["我的重点整理", "考前补充", "近五年真题"],
           "labels": {
             "answer_bank": "custom_answer_bank",
             "我的答案库": "my_answer_bank",
-            "我的重点整理": "my_focus_bank"
+            "我的重点整理": "my_focus_bank",
+            "近五年真题": "past_exam_bank"
           }
         }
         """,
@@ -195,11 +206,14 @@ def test_load_priority_source_config_merges_user_rules(tmp_path: Path) -> None:
 
     assert "我的答案库" in priority_config.answer_bank_dirs
     assert "我的重点整理" in priority_config.priority_patterns
+    assert "近五年真题" in priority_config.priority_patterns
     assert is_exam_answer_bank_path("/data/我的答案库/补充.md", priority_config)
+    assert is_exam_answer_bank_path("/data/近五年真题.md", priority_config)
     assert priority_source_label("/data/answer_bank/补充.md", priority_config) == "custom_answer_bank"
     assert priority_source_label("/data/我的答案库/补充.md", priority_config) == "my_answer_bank"
     assert priority_source_label("/data/我的重点整理.md", priority_config) == "my_focus_bank"
     assert priority_source_label("/data/考前补充.md", priority_config) == "custom_answer_bank"
+    assert priority_source_label("/data/近五年真题.md", priority_config) == "past_exam_bank"
 
 
 def test_load_priority_source_config_falls_back_on_broken_json(tmp_path: Path) -> None:

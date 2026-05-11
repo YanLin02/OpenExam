@@ -207,16 +207,15 @@ In the Streamlit UI, choose `Solve exam problem` to submit one exam problem to i
 
 Calculation parsing includes common CNN shape forms such as `3x32x32`, explicit `NCHW=8x3x32x32`, explicit `NHWC=8x32x32x3`, and named dimensions like `batch=16, channels=3, height=224, width=224`. It also supports structured total parameter questions such as `Conv1 ...; Conv2 ...; FC ...` and `MLP 784-128-64-10`.
 
-The exam answer bank is a lightweight priority retrieval layer for `concept` and `short_answer` questions. Put these files in the indexed materials directory, then rerun ingest:
-
-- `深度学习简答题_开卷检索版.md`
-- `近五年真题.md`
-- `《深度学习》附录名词术语详解.pdf`
+The exam answer bank is a lightweight priority retrieval layer for `concept` and `short_answer` questions. By default, OpenExam no longer prioritizes files by specific built-in filenames. Put answer-bank files under a recognized directory such as `data/answer_bank/`, then rerun ingest:
 
 ```bash
-python -m openexam ingest /path/to/materials
+python -m openexam ingest /path/to/materials --rebuild
+python -m openexam embed
 python -m openexam status
 ```
+
+If you prefer not to move existing files, configure filename patterns in `.openexam/priority_sources.json`.
 
 Use `--priority-answer-bank` or `--no-priority-answer-bank` to override the default. `ask` defaults to disabled. `solve` defaults to auto: enabled for `concept` and `short_answer`, disabled for calculation, design, derivation, and compare. In the Streamlit UI, enable `优先考试答案库` in Ask local AI or Solve exam problem. This priority layer only reorders retrieved local chunks; it does not change calculator results and does not invent sources.
 
@@ -257,15 +256,19 @@ python3 -m openexam status
 python3 -m openexam search "你的问题" --priority-answer-bank
 ```
 
+Default priority detection is directory-based. Specific filenames such as old course handouts are not prioritized from the data root unless they are placed under `answer_bank/` or matched by user config.
+
 Optional custom rules can be stored in `.openexam/priority_sources.json`:
 
 ```json
 {
   "answer_bank_dirs": ["answer_bank", "易考", "重点"],
-  "priority_patterns": ["我的重点整理", "考前补充"],
+  "priority_patterns": ["我的重点整理", "考前补充", "深度学习简答题_开卷检索版", "近五年真题"],
   "labels": {
     "answer_bank": "custom_answer_bank",
-    "易考": "exam_focus_bank"
+    "易考": "exam_focus_bank",
+    "深度学习简答题_开卷检索版": "short_answer_bank",
+    "近五年真题": "past_exam_bank"
   }
 }
 ```

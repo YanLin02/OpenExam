@@ -11,14 +11,9 @@ from openexam.db import connect
 from openexam.models import SearchResult
 
 
-EXAM_ANSWER_BANK_PATTERNS = (
-    "深度学习简答题_开卷检索版",
-    "近五年真题",
-    "附录名词术语详解",
-    "《深度学习》附录名词术语详解",
-)
-
-DEFAULT_PRIORITY_PATTERNS = EXAM_ANSWER_BANK_PATTERNS
+# Built-in filename patterns were removed. Put files under answer_bank/
+# or configure .openexam/priority_sources.json.
+DEFAULT_PRIORITY_PATTERNS: tuple[str, ...] = ()
 DEFAULT_ANSWER_BANK_DIR_NAMES = (
     "answer_bank",
     "exam_answer_bank",
@@ -26,13 +21,6 @@ DEFAULT_ANSWER_BANK_DIR_NAMES = (
     "易考",
     "重点",
     "答案库",
-)
-
-_ANSWER_BANK_LABELS = (
-    ("深度学习简答题_开卷检索版", "short_answer_bank"),
-    ("近五年真题", "past_exam_bank"),
-    ("《深度学习》附录名词术语详解", "terminology_bank"),
-    ("附录名词术语详解", "terminology_bank"),
 )
 
 _DEFAULT_DIR_LABELS = {
@@ -139,9 +127,6 @@ def is_exam_answer_bank_path(path: str, config: AppConfig | PrioritySourceConfig
 def priority_source_label(path: str, config: AppConfig | PrioritySourceConfig | None = None) -> str | None:
     priority_config = _configured(config)
     text = _path_text(path)
-    for pattern, label in _ANSWER_BANK_LABELS:
-        if pattern.casefold() in text:
-            return label
     for pattern in priority_config.priority_patterns:
         if pattern.casefold() in text:
             return priority_config.labels.get(pattern, "custom_answer_bank")
@@ -212,6 +197,7 @@ def merge_priority_results(
     if not priority_enabled:
         return results[:top_k]
 
+    priority_config = _configured(config)
     seen: set[tuple[int, str]] = set()
     priority: list[SearchResult] = []
     regular: list[SearchResult] = []
@@ -220,7 +206,7 @@ def merge_priority_results(
         if key in seen:
             continue
         seen.add(key)
-        if is_exam_answer_bank_result(result, config):
+        if is_exam_answer_bank_result(result, priority_config):
             if is_heading_only_answer_bank_chunk(result.text):
                 continue
             priority.append(result)
@@ -232,6 +218,7 @@ def merge_priority_results(
 def find_indexed_answer_bank_sources(config: AppConfig = DEFAULT_CONFIG) -> list[str]:
     if not config.db_path.exists():
         return []
+    priority_config = load_priority_source_config(config)
     conn = connect(config.db_path)
     try:
         rows = conn.execute(
@@ -247,7 +234,7 @@ def find_indexed_answer_bank_sources(config: AppConfig = DEFAULT_CONFIG) -> list
         for row in rows:
             path = str(row["path"])
             filename = str(row["filename"])
-            label = priority_source_label(path, config) or priority_source_label(filename, config)
+            label = priority_source_label(path, priority_config) or priority_source_label(filename, priority_config)
             if label is None:
                 continue
             display = f"{Path(path).name} [{label}]"

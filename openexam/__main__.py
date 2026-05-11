@@ -265,7 +265,7 @@ def cmd_status(args: argparse.Namespace) -> int:
             for source in answer_bank_sources:
                 print(f"- {source}")
         else:
-            print("Exam answer bank message: 未检测到考试答案库文件。请将三份文件放入资料目录并重新建立索引。")
+            print("Exam answer bank message: 未检测到考试答案库。可将文件放入资料目录下的 answer_bank/，然后重新建立索引。")
         failures = failed_documents(conn)
         if failures:
             print("\nRecent failures:")

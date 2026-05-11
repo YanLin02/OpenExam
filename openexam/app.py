@@ -124,7 +124,7 @@ def render_index_status() -> None:
                 for source in answer_bank_sources:
                     st.caption(source)
         else:
-            st.sidebar.warning("未检测到考试答案库文件。请将三份文件放入资料目录并重新建立索引。")
+            st.sidebar.warning("未检测到考试答案库。可将 .md/.txt/.pdf 文件放入资料目录下的 answer_bank/，然后重新建立索引。")
         failures = failed_documents(conn, limit=10)
         if failures:
             with st.sidebar.expander("Recent failed files", expanded=False):
@@ -563,7 +563,7 @@ def render_controls() -> tuple[str, str, str, str, int, str, int, str, str, str,
         priority_answer_bank = st.checkbox(
             "优先考试答案库",
             value=default_priority,
-            help="对名词解释和简答题建议开启。优先使用：深度学习简答题_开卷检索版.md、近五年真题.md、《深度学习》附录名词术语详解.pdf。前提是这些文件已放入资料目录并完成索引。",
+            help="对名词解释和简答题建议开启。默认识别 answer_bank/、易考/、重点/ 等目录；也可在 .openexam/priority_sources.json 配置文件名 pattern。前提是文件已完成索引。",
         )
     elif kind == "ask":
         evidence_policy = param_cols[2].selectbox("Evidence", options=["warn", "strict", "open"], index=0)
@@ -579,7 +579,7 @@ def render_controls() -> tuple[str, str, str, str, int, str, int, str, str, str,
         priority_answer_bank = st.checkbox(
             "优先考试答案库",
             value=False,
-            help="对名词解释和简答题建议开启。优先使用：深度学习简答题_开卷检索版.md、近五年真题.md、《深度学习》附录名词术语详解.pdf。前提是这些文件已放入资料目录并完成索引。",
+            help="对名词解释和简答题建议开启。默认识别 answer_bank/、易考/、重点/ 等目录；也可在 .openexam/priority_sources.json 配置文件名 pattern。前提是文件已完成索引。",
         )
     return (
         action,

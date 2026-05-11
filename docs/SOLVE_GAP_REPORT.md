@@ -86,17 +86,13 @@ Design, derivation, and compare templates improve structure but still rely on lo
 
 ## Exam Answer Bank Priority
 
-Concept and short-answer solve requests can prioritize these indexed files:
+Concept and short-answer solve requests can prioritize indexed answer-bank directories. The default rules are path/directory based: `answer_bank`, `exam_answer_bank`, `priority_sources`, `易考`, `重点`, and `答案库`.
 
-- `深度学习简答题_开卷检索版.md`
-- `近五年真题.md`
-- `《深度学习》附录名词术语详解.pdf`
-
-The strategy is path/name based and does not require a database schema change. It only reorders retrieved chunks before prompt construction, preserving source citations and original scores. It requires the files to be present in the materials directory and ingested. It is not used to compute or override `calculation` numeric answers.
+The strategy does not require a database schema change. It only reorders retrieved chunks before prompt construction, preserving source citations and original scores. It requires the files to be present in a recognized answer-bank directory and ingested. It is not used to compute or override `calculation` numeric answers.
 
 Markdown exam answer banks are section-aware during extraction: `###` question headings are grouped with following answer paragraphs before normal chunking. This requires re-ingesting the files. If priority results still contain only question headings, run `python3 -m openexam ingest /path/to/materials --rebuild` first.
 
-Priority source recognition supports both legacy filename patterns and answer-bank directories such as `answer_bank`, `exam_answer_bank`, `priority_sources`, `易考`, `重点`, and `答案库`. Optional rules can be merged through `.openexam/priority_sources.json`; a broken config falls back to defaults and surfaces a warning in status/UI.
+Built-in legacy filename patterns have been removed. Files such as old course answer sheets or glossary PDFs are not prioritized from the data root by filename alone. Move them under `answer_bank/` or configure `priority_patterns` in `.openexam/priority_sources.json`; a broken config falls back to directory defaults and surfaces a warning in status/UI.
 
 ## Recommended Exam Usage
 
