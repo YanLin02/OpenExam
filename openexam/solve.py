@@ -16,6 +16,7 @@ from openexam.ask import (
 )
 from openexam.calculators.parser import CalculationAnswer, solve_calculation_question
 from openexam.config import AppConfig, DEFAULT_CONFIG
+from openexam.design_templates import DesignTaskType, build_design_answer_plan, build_design_prompt, classify_design_task
 from openexam.problem_types import ProblemType, classify_problem
 from openexam.search import SearchMode, search_index
 from openexam.sources import SearchScope, SourcePreference
@@ -43,6 +44,8 @@ class SolveResponse:
     ask_response: AskResponse
     requested_mode: str
     calculation_answer: CalculationAnswer | None = None
+    design_task_type: DesignTaskType | None = None
+    design_sections: list[str] | None = None
     fallback_note: str | None = None
 
 
@@ -136,6 +139,39 @@ def solve_question(
             requested_mode=mode.value if isinstance(mode, ProblemType) else mode,
             calculation_answer=calculation_answer,
             fallback_note="未能可靠解析题目参数，以下为基于本地资料和模型的解题说明。",
+        )
+
+    if problem_type == ProblemType.DESIGN:
+        design_task_type = classify_design_task(question)
+        design_plan = build_design_answer_plan(question, design_task_type)
+        enhanced_question = build_design_prompt(
+            question,
+            design_plan,
+            retrieved_context="OpenExam Ask 会在下一步检索本地片段并附带来源。",
+            evidence_status="unknown",
+            detail=detail,
+        )
+        ask_response = ask_question(
+            enhanced_question,
+            config=config,
+            mode=options.search_mode,
+            scope=options.scope,
+            prefer=options.prefer,
+            per_file_cap=options.per_file_cap,
+            top_k=options.top_k,
+            llm_model=options.llm_model,
+            evidence_policy=evidence_policy,
+            detail=detail,
+            auto_start_ollama=options.auto_start_ollama,
+        )
+        return SolveResponse(
+            question=question,
+            problem_type=problem_type,
+            strategy=design_plan.guidance,
+            ask_response=ask_response,
+            requested_mode=mode.value if isinstance(mode, ProblemType) else mode,
+            design_task_type=design_task_type,
+            design_sections=design_plan.sections,
         )
 
     ask_response = ask_question(
@@ -244,6 +280,17 @@ def render_solve_response(response: SolveResponse) -> str:
             f"本地依据：\n{evidence}\n\n"
             f"来源：\n{sources}\n\n"
             "计算说明：\n数值结果来自 deterministic calculator；LLM 不参与也不能覆盖上述数值结果。"
+        )
+    if response.problem_type == ProblemType.DESIGN and response.design_task_type is not None:
+        sections = "\n".join(f"{index}. {section}" for index, section in enumerate(response.design_sections or [], start=1))
+        return (
+            f"题型：\n{response.problem_type.value}\n\n"
+            f"设计任务类型：\n{response.design_task_type.value}\n\n"
+            f"解题策略：\n{response.strategy}\n\n"
+            f"答题结构：\n{sections}\n\n"
+            f"答案：\n{_solve_answer_text(ask_response)}\n\n"
+            f"依据：\n{evidence}\n\n"
+            f"来源：\n{sources}"
         )
     note = f"{response.fallback_note}\n\n" if response.fallback_note else ""
     return (

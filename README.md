@@ -183,6 +183,18 @@ Ask a local cited question using retrieved chunks:
 python -m openexam ask "summarize this concept" --mode hybrid --top-k 6 --evidence-policy warn
 ```
 
+### Solve
+
+Solve exam-style questions with a task-aware answer format:
+
+```bash
+python -m openexam solve "design a CNN for handwritten digit recognition" --problem-type design --detail concise
+```
+
+`solve` keeps retrieval local and reuses the same evidence controls as `ask`. Design questions use a structured template before calling the local LLM, so answers are organized as exam-ready drafts with sections such as task objective, input/output, model structure, loss function, optimization, overfitting controls, and metrics. If local evidence is insufficient, the answer follows `--evidence-policy` and must mark that limitation instead of inventing sources.
+
+The output is a study and exam-answer draft. Adjust the level of detail and section emphasis to match the exact question wording.
+
 ## Semantic Search
 
 Semantic search is optional. It uses a local Ollama embedding model, with `bge-m3` as the default model.

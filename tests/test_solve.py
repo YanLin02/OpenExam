@@ -3,6 +3,7 @@ from __future__ import annotations
 from openexam.__main__ import build_parser, cmd_solve
 from openexam.ask import AskResponse
 from openexam.config import AppConfig
+from openexam.design_templates import DesignTaskType
 from openexam.models import SearchResult
 from openexam.problem_types import ProblemType
 from openexam.solve import SolveResponse, SolveSearchOptions, render_solve_response, solve_question
@@ -69,8 +70,12 @@ def test_solve_question_classifies_and_calls_ask_fallback(monkeypatch, tmp_path)
     )
 
     assert response.problem_type == ProblemType.DESIGN
+    assert response.design_task_type is not None
+    assert response.design_sections is not None
     assert "设计" in response.strategy or "任务目标" in response.strategy
-    assert seen["question"] == "设计一个 CNN 完成手写数字识别任务"
+    assert "原始设计题：\n设计一个 CNN 完成手写数字识别任务" in str(seen["question"])
+    assert "答题结构" in str(seen["question"])
+    assert "网络结构" in str(seen["question"])
     assert seen["mode"] == "keyword"
     assert seen["scope"] == "lecture"
     assert seen["prefer"] == "none"
@@ -139,11 +144,15 @@ def test_render_solve_response_contains_required_sections() -> None:
         strategy="先拆分任务目标。",
         ask_response=make_ask_response("设计一个 CNN 完成手写数字识别任务"),
         requested_mode="auto",
+        design_task_type=DesignTaskType.IMAGE_CLASSIFICATION,
+        design_sections=["任务目标", "输入输出", "网络结构"],
     )
 
     rendered = render_solve_response(response)
 
     assert "题型：\ndesign" in rendered
+    assert "设计任务类型：\nimage_classification" in rendered
+    assert "答题结构：" in rendered
     assert "解题策略：" in rendered
     assert "答案：" in rendered
     assert "依据：" in rendered
