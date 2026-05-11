@@ -10,6 +10,7 @@ from openexam.priority_sources import (
     find_indexed_answer_bank_sources,
     is_heading_only_answer_bank_chunk,
     is_exam_answer_bank_path,
+    load_priority_source_config,
     merge_priority_results,
     priority_source_label,
     split_answer_bank_markdown_sections,
@@ -39,10 +40,20 @@ def test_exam_answer_bank_path_detection() -> None:
     assert is_exam_answer_bank_path("/data/深度学习简答题_开卷检索版.md")
     assert is_exam_answer_bank_path("/data/近五年真题.md")
     assert is_exam_answer_bank_path("/data/《深度学习》附录名词术语详解.pdf")
+    assert is_exam_answer_bank_path("/data/answer_bank/易考补充.md")
+    assert is_exam_answer_bank_path("/data/exam_answer_bank/名词解释补充.md")
+    assert is_exam_answer_bank_path("/data/priority_sources/简答题补充.md")
+    assert is_exam_answer_bank_path("/data/易考/Transformer重点.md")
+    assert is_exam_answer_bank_path("/data/重点/名词解释.md")
     assert not is_exam_answer_bank_path("/data/Chapter+2-CNN.pdf")
     assert priority_source_label("/data/深度学习简答题_开卷检索版.md") == "short_answer_bank"
     assert priority_source_label("/data/近五年真题.md") == "past_exam_bank"
     assert priority_source_label("/data/《深度学习》附录名词术语详解.pdf") == "terminology_bank"
+    assert priority_source_label("/data/answer_bank/易考补充.md") == "directory_answer_bank"
+    assert priority_source_label("/data/exam_answer_bank/名词解释补充.md") == "directory_answer_bank"
+    assert priority_source_label("/data/priority_sources/简答题补充.md") == "directory_answer_bank"
+    assert priority_source_label("/data/易考/Transformer重点.md") == "exam_focus_bank"
+    assert priority_source_label("/data/重点/名词解释.md") == "exam_focus_bank"
 
 
 def test_merge_priority_results_orders_answer_bank_first() -> None:
@@ -136,13 +147,70 @@ def test_find_indexed_answer_bank_sources(tmp_path: Path) -> None:
         )
         conn.execute(
             "INSERT INTO documents(path, filename, ext, status, source_type) VALUES (?, ?, ?, ?, ?)",
+            ("/data/answer_bank/易考补充.md", "易考补充.md", ".md", "indexed", "other"),
+        )
+        conn.execute(
+            "INSERT INTO documents(path, filename, ext, status, source_type) VALUES (?, ?, ?, ?, ?)",
             ("/data/Chapter+2-CNN.pdf", "Chapter+2-CNN.pdf", ".pdf", "indexed", "lecture"),
         )
         conn.commit()
     finally:
         conn.close()
 
-    assert find_indexed_answer_bank_sources(config) == ["近五年真题.md"]
+    assert set(find_indexed_answer_bank_sources(config)) == {
+        "易考补充.md [directory_answer_bank]",
+        "近五年真题.md [past_exam_bank]",
+    }
+
+
+def test_load_priority_source_config_defaults_when_missing(tmp_path: Path) -> None:
+    config = AppConfig(index_dir=tmp_path / ".openexam")
+
+    priority_config = load_priority_source_config(config)
+
+    assert "answer_bank" in priority_config.answer_bank_dirs
+    assert "近五年真题" in priority_config.priority_patterns
+    assert priority_config.warnings == ()
+
+
+def test_load_priority_source_config_merges_user_rules(tmp_path: Path) -> None:
+    config = AppConfig(index_dir=tmp_path / ".openexam")
+    config.index_dir.mkdir()
+    (config.index_dir / "priority_sources.json").write_text(
+        """
+        {
+          "answer_bank_dirs": ["我的答案库"],
+          "priority_patterns": ["我的重点整理", "考前补充"],
+          "labels": {
+            "answer_bank": "custom_answer_bank",
+            "我的答案库": "my_answer_bank",
+            "我的重点整理": "my_focus_bank"
+          }
+        }
+        """,
+        encoding="utf-8",
+    )
+
+    priority_config = load_priority_source_config(config)
+
+    assert "我的答案库" in priority_config.answer_bank_dirs
+    assert "我的重点整理" in priority_config.priority_patterns
+    assert is_exam_answer_bank_path("/data/我的答案库/补充.md", priority_config)
+    assert priority_source_label("/data/answer_bank/补充.md", priority_config) == "custom_answer_bank"
+    assert priority_source_label("/data/我的答案库/补充.md", priority_config) == "my_answer_bank"
+    assert priority_source_label("/data/我的重点整理.md", priority_config) == "my_focus_bank"
+    assert priority_source_label("/data/考前补充.md", priority_config) == "custom_answer_bank"
+
+
+def test_load_priority_source_config_falls_back_on_broken_json(tmp_path: Path) -> None:
+    config = AppConfig(index_dir=tmp_path / ".openexam")
+    config.index_dir.mkdir()
+    (config.index_dir / "priority_sources.json").write_text("{broken", encoding="utf-8")
+
+    priority_config = load_priority_source_config(config)
+
+    assert "answer_bank" in priority_config.answer_bank_dirs
+    assert priority_config.warnings
 
 
 def test_ask_question_passes_priority_to_search(monkeypatch, tmp_path: Path) -> None:

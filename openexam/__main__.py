@@ -12,7 +12,7 @@ from openexam.file_utils import file_uri, open_local_file, open_pdf_page_in_chro
 from openexam.ingest import ingest_directory
 from openexam.ollama_utils import ensure_ollama_running
 from openexam.problem_types import ProblemType, classify_problem
-from openexam.priority_sources import find_indexed_answer_bank_sources
+from openexam.priority_sources import find_indexed_answer_bank_sources, load_priority_source_config
 from openexam.search import search_index
 from openexam.solve import render_solve_response, solve_question
 
@@ -256,8 +256,11 @@ def cmd_status(args: argparse.Namespace) -> int:
         print(f"Semantic model: {semantic.model}")
         print(f"Semantic chunks: {semantic.vector_count}")
         print(f"Semantic message: {semantic.message}")
+        priority_config = load_priority_source_config(DEFAULT_CONFIG)
+        for warning in priority_config.warnings:
+            print(f"Priority source warning: {warning}")
         answer_bank_sources = find_indexed_answer_bank_sources(DEFAULT_CONFIG)
-        print(f"Exam answer bank: indexed {len(answer_bank_sources)}/3")
+        print(f"Exam answer bank: indexed {len(answer_bank_sources)}")
         if answer_bank_sources:
             for source in answer_bank_sources:
                 print(f"- {source}")

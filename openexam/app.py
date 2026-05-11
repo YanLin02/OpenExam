@@ -45,6 +45,7 @@ from openexam.problem_types import ProblemType, classify_problem
 from openexam.priority_sources import (
     exam_answer_bank_label_for_result,
     find_indexed_answer_bank_sources,
+    load_priority_source_config,
 )
 from openexam.solve import SolveResponse, render_solve_response
 from openexam.ui_state import (
@@ -114,7 +115,10 @@ def render_index_status() -> None:
         )
         st.sidebar.caption(f"Embedding model: {semantic.model}. {semantic.message}")
         answer_bank_sources = find_indexed_answer_bank_sources(DEFAULT_CONFIG)
-        st.sidebar.caption(f"考试答案库：已索引 {len(answer_bank_sources)}/3")
+        st.sidebar.caption(f"考试答案库：已索引 {len(answer_bank_sources)}")
+        priority_config = load_priority_source_config(DEFAULT_CONFIG)
+        for warning in priority_config.warnings:
+            st.sidebar.warning(warning)
         if answer_bank_sources:
             with st.sidebar.expander("已检测到的考试答案库", expanded=False):
                 for source in answer_bank_sources:

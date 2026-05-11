@@ -224,6 +224,52 @@ Exam answer bank Markdown files are extracted by question heading, so `###` ques
 
 The output is a study and exam-answer draft. Adjust the level of detail and section emphasis to match the exact question wording.
 
+### Custom Priority Answer Banks
+
+To add your own priority answer bank, create a directory under your materials folder:
+
+```text
+data/answer_bank/
+```
+
+OpenExam also recognizes these directory names as priority sources: `answer_bank`, `exam_answer_bank`, `priority_sources`, `易考`, `重点`, and `答案库`.
+
+Write Markdown with one question per `###` heading:
+
+```markdown
+# 易考补充
+
+## 名词解释
+
+### 1. Dropout
+
+**关键词：Dropout、正则化、随机失活、过拟合**
+
+Dropout 是一种正则化方法……
+```
+
+Rebuild the index, optionally rebuild embeddings, then verify:
+
+```bash
+python3 -m openexam ingest "/path/to/data" --rebuild
+python3 -m openexam embed
+python3 -m openexam status
+python3 -m openexam search "你的问题" --priority-answer-bank
+```
+
+Optional custom rules can be stored in `.openexam/priority_sources.json`:
+
+```json
+{
+  "answer_bank_dirs": ["answer_bank", "易考", "重点"],
+  "priority_patterns": ["我的重点整理", "考前补充"],
+  "labels": {
+    "answer_bank": "custom_answer_bank",
+    "易考": "exam_focus_bank"
+  }
+}
+```
+
 Solve has a small exam regression suite in `tests/fixtures/exam_questions.json`, covering calculation, design, derivation, compare, concept, and short-answer style prompts. Run it with:
 
 ```bash

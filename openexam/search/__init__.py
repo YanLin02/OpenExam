@@ -209,7 +209,7 @@ def search_index(
                 capped.append(result)
                 if len(capped) >= result_limit:
                     break
-            return merge_priority_results(capped, top_k=top_k, priority_enabled=priority_answer_bank)
-        return merge_priority_results(results, top_k=top_k, priority_enabled=priority_answer_bank)
+            return merge_priority_results(capped, top_k=top_k, priority_enabled=priority_answer_bank, config=config)
+        return merge_priority_results(results, top_k=top_k, priority_enabled=priority_answer_bank, config=config)
     finally:
         conn.close()

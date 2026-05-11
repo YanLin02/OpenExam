@@ -96,6 +96,8 @@ The strategy is path/name based and does not require a database schema change. I
 
 Markdown exam answer banks are section-aware during extraction: `###` question headings are grouped with following answer paragraphs before normal chunking. This requires re-ingesting the files. If priority results still contain only question headings, run `python3 -m openexam ingest /path/to/materials --rebuild` first.
 
+Priority source recognition supports both legacy filename patterns and answer-bank directories such as `answer_bank`, `exam_answer_bank`, `priority_sources`, `易考`, `重点`, and `答案库`. Optional rules can be merged through `.openexam/priority_sources.json`; a broken config falls back to defaults and surfaces a warning in status/UI.
+
 ## Recommended Exam Usage
 
 - Use directly for parseable `calculation` questions. Numeric results come from deterministic calculators.

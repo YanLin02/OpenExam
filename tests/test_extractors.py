@@ -33,7 +33,9 @@ def test_txt_extractor_preserves_paragraphs(tmp_path) -> None:
 
 
 def test_answer_bank_md_uses_section_parser(tmp_path) -> None:
-    path = tmp_path / "深度学习简答题_开卷检索版.md"
+    answer_bank_dir = tmp_path / "answer_bank"
+    answer_bank_dir.mkdir()
+    path = answer_bank_dir / "易考补充.md"
     path.write_text(
         """## 第二章 生成模型
 
