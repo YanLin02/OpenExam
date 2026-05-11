@@ -74,6 +74,7 @@ def cmd_search(args: argparse.Namespace) -> int:
             prefer=args.prefer,
             per_file_cap=args.per_file_cap,
             timing=timing,
+            priority_answer_bank=args.priority_answer_bank,
         )
     except EmbeddingError as exc:
         print(f"Semantic search unavailable: {exc}", file=sys.stderr)
@@ -318,6 +319,13 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=0,
         help="Maximum results per file. 0 disables the cap.",
+    )
+    search_parser.add_argument(
+        "--priority-answer-bank",
+        dest="priority_answer_bank",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Prioritize indexed exam answer bank sources during search. Default: disabled.",
     )
     search_parser.add_argument("--open-first", action="store_true", help="Open the top result file with macOS `open`.")
     search_parser.add_argument(

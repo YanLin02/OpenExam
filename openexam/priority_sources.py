@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+import re
 from pathlib import Path
 
 from openexam.config import AppConfig, DEFAULT_CONFIG
@@ -44,6 +45,52 @@ def is_exam_answer_bank_result(result: SearchResult) -> bool:
     return is_exam_answer_bank_path(result.source_path) or is_exam_answer_bank_path(result.file_name)
 
 
+_MARKDOWN_HEADING_RE = re.compile(r"^(#{2,6})\s+(.+?)\s*$")
+
+
+def split_answer_bank_markdown_sections(text: str) -> list[str]:
+    normalized = text.replace("\r\n", "\n").replace("\r", "\n")
+    sections: list[str] = []
+    current: list[str] = []
+
+    def flush() -> None:
+        nonlocal current
+        if not current:
+            return
+        section = "\n".join(current).strip()
+        current = []
+        if not section:
+            return
+        lines = [line.strip() for line in section.splitlines() if line.strip()]
+        if len(lines) <= 1 and lines and lines[0].startswith("###"):
+            return
+        sections.append(section)
+
+    for line in normalized.splitlines():
+        match = _MARKDOWN_HEADING_RE.match(line)
+        if match:
+            level = len(match.group(1))
+            if level <= 3:
+                flush()
+                current = [line] if level == 3 else []
+                continue
+        if current:
+            current.append(line)
+    flush()
+    return sections
+
+
+def is_heading_only_answer_bank_chunk(text: str) -> bool:
+    stripped = text.strip()
+    if not stripped.startswith("###"):
+        return False
+    lines = [line.strip() for line in stripped.splitlines() if line.strip()]
+    if len(lines) <= 1:
+        return True
+    body = "\n".join(lines[1:]).strip()
+    return len(body) < 12
+
+
 def merge_priority_results(
     results: list[SearchResult],
     top_k: int,
@@ -61,6 +108,8 @@ def merge_priority_results(
             continue
         seen.add(key)
         if is_exam_answer_bank_result(result):
+            if is_heading_only_answer_bank_chunk(result.text):
+                continue
             priority.append(result)
         else:
             regular.append(result)

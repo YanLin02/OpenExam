@@ -220,6 +220,8 @@ python -m openexam status
 
 Use `--priority-answer-bank` or `--no-priority-answer-bank` to override the default. `ask` defaults to disabled. `solve` defaults to auto: enabled for `concept` and `short_answer`, disabled for calculation, design, derivation, and compare. In the Streamlit UI, enable `优先考试答案库` in Ask local AI or Solve exam problem. This priority layer only reorders retrieved local chunks; it does not change calculator results and does not invent sources.
 
+Exam answer bank Markdown files are extracted by question heading, so `###` question titles are grouped with the following answer paragraphs before chunking. This avoids retrieving only the question title without the answer body.
+
 The output is a study and exam-answer draft. Adjust the level of detail and section emphasis to match the exact question wording.
 
 Solve has a small exam regression suite in `tests/fixtures/exam_questions.json`, covering calculation, design, derivation, compare, concept, and short-answer style prompts. Run it with:

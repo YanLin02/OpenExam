@@ -8,9 +8,11 @@ from openexam.db import connect
 from openexam.models import SearchResult
 from openexam.priority_sources import (
     find_indexed_answer_bank_sources,
+    is_heading_only_answer_bank_chunk,
     is_exam_answer_bank_path,
     merge_priority_results,
     priority_source_label,
+    split_answer_bank_markdown_sections,
 )
 from openexam.solve import solve_question
 
@@ -63,6 +65,65 @@ def test_merge_priority_results_preserves_original_order_and_dedupes() -> None:
 
     assert merged == [priority_1, priority_2]
     assert merge_priority_results([priority_2, priority_1], top_k=1, priority_enabled=False) == [priority_2]
+
+
+def test_split_answer_bank_markdown_sections_merges_heading_and_answer() -> None:
+    text = """## 第二章 生成模型
+
+### 5．请简述 GAN 的训练过程。
+
+GAN 由生成器和判别器组成。
+
+训练过程：
+1. 固定 G，训练 D；
+2. 固定 D，训练 G。
+
+### 6．请简述 Dropout。
+
+Dropout 是一种正则化方法。
+"""
+
+    sections = split_answer_bank_markdown_sections(text)
+
+    assert len(sections) == 2
+    assert "### 5．请简述 GAN 的训练过程。" in sections[0]
+    assert "生成器" in sections[0]
+    assert "判别器" in sections[0]
+    assert "固定 G" in sections[0]
+    assert "### 6．请简述 Dropout。" in sections[1]
+    assert "Dropout 是一种正则化方法" in sections[1]
+
+
+def test_split_answer_bank_markdown_sections_ignores_chapter_heading_only() -> None:
+    sections = split_answer_bank_markdown_sections(
+        """## 第二章 卷积神经网络
+
+### 1. 深度学习（Deep Learning）
+
+深度学习是表示学习的一类方法。
+"""
+    )
+
+    assert sections == ["### 1. 深度学习（Deep Learning）\n\n深度学习是表示学习的一类方法。"]
+
+
+def test_heading_only_answer_bank_chunk_detection() -> None:
+    assert is_heading_only_answer_bank_chunk("### 5．请简述 GAN 的训练过程。")
+    assert is_heading_only_answer_bank_chunk("### 5．请简述 GAN 的训练过程。\n\n答案：")
+    assert not is_heading_only_answer_bank_chunk("### 6．请简述 Dropout。\n\nDropout 是一种正则化方法。")
+
+
+def test_merge_priority_results_skips_heading_only_priority_chunk() -> None:
+    heading = make_result(1, "/data/近五年真题.md")
+    heading.text = "### 5．请简述 GAN 的训练过程。"
+    answer = make_result(2, "/data/深度学习简答题_开卷检索版.md")
+    answer.text = "### 5．请简述 GAN 的训练过程。\n\nGAN 由生成器和判别器组成。"
+    regular = make_result(3, "/data/Chapter+2-CNN.pdf")
+
+    merged = merge_priority_results([regular, heading, answer], top_k=3, priority_enabled=True)
+
+    assert merged == [answer, regular]
+    assert heading not in merged
 
 
 def test_find_indexed_answer_bank_sources(tmp_path: Path) -> None:

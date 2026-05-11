@@ -32,6 +32,55 @@ def test_txt_extractor_preserves_paragraphs(tmp_path) -> None:
     assert sections[1].location_type == "paragraph"
 
 
+def test_answer_bank_md_uses_section_parser(tmp_path) -> None:
+    path = tmp_path / "深度学习简答题_开卷检索版.md"
+    path.write_text(
+        """## 第二章 生成模型
+
+### 5．请简述 GAN 的训练过程。
+
+GAN 由生成器和判别器组成。
+
+训练过程：
+1. 固定 G，训练 D；
+2. 固定 D，训练 G。
+
+### 6．请简述 Dropout。
+
+Dropout 是一种正则化方法。
+""",
+        encoding="utf-8",
+    )
+
+    sections = extract_text_file(path)
+
+    assert len(sections) == 2
+    assert sections[0].location_type == "section"
+    assert sections[0].location_label == "section.1"
+    assert "请简述 GAN" in sections[0].text
+    assert "生成器" in sections[0].text
+    assert "固定 G" in sections[0].text
+    assert "Dropout 是一种正则化方法" in sections[1].text
+
+
+def test_regular_md_keeps_paragraph_split(tmp_path) -> None:
+    path = tmp_path / "regular.md"
+    path.write_text(
+        """### 5．请简述 GAN 的训练过程。
+
+GAN 由生成器和判别器组成。
+""",
+        encoding="utf-8",
+    )
+
+    sections = extract_text_file(path)
+
+    assert len(sections) == 2
+    assert sections[0].location_type == "paragraph"
+    assert sections[0].text.startswith("###")
+    assert "生成器" in sections[1].text
+
+
 def test_docx_extractor_preserves_paragraphs(tmp_path) -> None:
     docx = pytest.importorskip("docx")
     path = tmp_path / "sample.docx"

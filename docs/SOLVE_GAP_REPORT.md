@@ -94,6 +94,8 @@ Concept and short-answer solve requests can prioritize these indexed files:
 
 The strategy is path/name based and does not require a database schema change. It only reorders retrieved chunks before prompt construction, preserving source citations and original scores. It requires the files to be present in the materials directory and ingested. It is not used to compute or override `calculation` numeric answers.
 
+Markdown exam answer banks are section-aware during extraction: `###` question headings are grouped with following answer paragraphs before normal chunking. This requires re-ingesting the files. If priority results still contain only question headings, run `python3 -m openexam ingest /path/to/materials --rebuild` first.
+
 ## Recommended Exam Usage
 
 - Use directly for parseable `calculation` questions. Numeric results come from deterministic calculators.
