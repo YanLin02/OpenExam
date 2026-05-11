@@ -11,6 +11,7 @@ from openexam.embeddings import EmbeddingError, build_embeddings, embedding_stat
 from openexam.file_utils import file_uri, open_local_file, open_pdf_page_in_chrome
 from openexam.ingest import ingest_directory
 from openexam.ollama_utils import ensure_ollama_running
+from openexam.problem_types import ProblemType, classify_problem
 from openexam.search import search_index
 from openexam.solve import render_solve_response, solve_question
 
@@ -155,11 +156,12 @@ def cmd_ask(args: argparse.Namespace) -> int:
 
 
 def cmd_solve(args: argparse.Namespace) -> int:
-    if not DEFAULT_CONFIG.db_path.exists():
-        print(f"Index not found: {DEFAULT_CONFIG.db_path}. Run ingest first.", file=sys.stderr)
-        return 2
     if not args.question.strip():
         print("Empty question. Please provide a question.", file=sys.stderr)
+        return 2
+    effective_problem_type = classify_problem(args.question).value if args.problem_type == "auto" else args.problem_type
+    if not DEFAULT_CONFIG.db_path.exists() and effective_problem_type != ProblemType.CALCULATION.value:
+        print(f"Index not found: {DEFAULT_CONFIG.db_path}. Run ingest first.", file=sys.stderr)
         return 2
     try:
         response = solve_question(

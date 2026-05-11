@@ -105,6 +105,33 @@ def test_solve_question_accepts_explicit_problem_type_and_search_options(monkeyp
     assert response.problem_type == ProblemType.DERIVATION
 
 
+def test_solve_question_uses_calculator_before_ask(monkeypatch, tmp_path) -> None:
+    called = False
+
+    def fake_ask_question(*args, **kwargs):
+        nonlocal called
+        called = True
+        return make_ask_response(args[0])
+
+    monkeypatch.setattr("openexam.solve.ask_question", fake_ask_question)
+
+    response = solve_question(
+        "给定输入 32x32，卷积核 5x5，stride=1，padding=0，输出尺寸是多少？",
+        mode="calculation",
+        config=AppConfig(index_dir=tmp_path / ".openexam"),
+    )
+    rendered = render_solve_response(response)
+
+    assert response.problem_type == ProblemType.CALCULATION
+    assert response.calculation_answer is not None
+    assert response.calculation_answer.calculation_type == "conv2d_output_size"
+    assert response.ask_response.llm_called is False
+    assert not called
+    assert "计算类型：\nconv2d_output_size" in rendered
+    assert "输出尺寸为 28 x 28" in rendered
+    assert "deterministic calculator" in rendered
+
+
 def test_render_solve_response_contains_required_sections() -> None:
     response = SolveResponse(
         question="设计一个 CNN 完成手写数字识别任务",

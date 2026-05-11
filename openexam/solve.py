@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 
 from openexam.ask import (
@@ -13,9 +14,10 @@ from openexam.ask import (
     format_evidence,
     format_source,
 )
+from openexam.calculators.parser import CalculationAnswer, solve_calculation_question
 from openexam.config import AppConfig, DEFAULT_CONFIG
 from openexam.problem_types import ProblemType, classify_problem
-from openexam.search import SearchMode
+from openexam.search import SearchMode, search_index
 from openexam.sources import SearchScope, SourcePreference
 
 
@@ -40,6 +42,8 @@ class SolveResponse:
     strategy: str
     ask_response: AskResponse
     requested_mode: str
+    calculation_answer: CalculationAnswer | None = None
+    fallback_note: str | None = None
 
 
 _SOLVE_STRATEGIES: dict[ProblemType, str] = {
@@ -91,6 +95,49 @@ def solve_question(
         llm_model=llm_model,
         auto_start_ollama=auto_start_ollama,
     )
+    if problem_type == ProblemType.CALCULATION:
+        calculation_answer = solve_calculation_question(question)
+        if not calculation_answer.need_manual_input:
+            evidence_response = _calculation_evidence_response(
+                question,
+                calculation_answer,
+                config=config,
+                options=options,
+                evidence_policy=evidence_policy,
+                detail=detail,
+            )
+            return SolveResponse(
+                question=question,
+                problem_type=problem_type,
+                strategy=_SOLVE_STRATEGIES[problem_type],
+                ask_response=evidence_response,
+                requested_mode=mode.value if isinstance(mode, ProblemType) else mode,
+                calculation_answer=calculation_answer,
+            )
+
+        ask_response = ask_question(
+            question,
+            config=config,
+            mode=options.search_mode,
+            scope=options.scope,
+            prefer=options.prefer,
+            per_file_cap=options.per_file_cap,
+            top_k=options.top_k,
+            llm_model=options.llm_model,
+            evidence_policy=evidence_policy,
+            detail=detail,
+            auto_start_ollama=options.auto_start_ollama,
+        )
+        return SolveResponse(
+            question=question,
+            problem_type=problem_type,
+            strategy=_SOLVE_STRATEGIES[problem_type],
+            ask_response=ask_response,
+            requested_mode=mode.value if isinstance(mode, ProblemType) else mode,
+            calculation_answer=calculation_answer,
+            fallback_note="未能可靠解析题目参数，以下为基于本地资料和模型的解题说明。",
+        )
+
     ask_response = ask_question(
         question,
         config=config,
@@ -113,6 +160,59 @@ def solve_question(
     )
 
 
+def _calculation_evidence_response(
+    question: str,
+    calculation_answer: CalculationAnswer,
+    *,
+    config: AppConfig,
+    options: SolveSearchOptions,
+    evidence_policy: EvidencePolicy,
+    detail: AnswerDetail,
+) -> AskResponse:
+    effective_top_k = options.top_k if options.top_k is not None else config.llm_context_top_k
+    results = []
+    search_mode = options.search_mode
+    retrieval_time_ms = 0.0
+    if config.db_path.exists():
+        try:
+            retrieval_start = time.perf_counter()
+            results = search_index(
+                question,
+                top_k=effective_top_k,
+                config=config,
+                mode=options.search_mode,
+                scope=options.scope,
+                prefer=options.prefer,
+                per_file_cap=options.per_file_cap,
+            )
+            retrieval_time_ms = (time.perf_counter() - retrieval_start) * 1000
+        except Exception:
+            results = []
+    evidence_status = "sufficient" if results else "none"
+    return AskResponse(
+        question=question,
+        answer=calculation_answer.result_text,
+        results=results,
+        search_mode=search_mode,
+        scope=options.scope,
+        prefer=options.prefer,
+        per_file_cap=options.per_file_cap,
+        top_k=effective_top_k,
+        llm_model=options.llm_model or config.llm_model,
+        llm_called=False,
+        evidence_status=evidence_status,
+        evidence_policy=evidence_policy,
+        missing_phrases=[],
+        timing={
+            "retrieval_time_ms": retrieval_time_ms,
+            "prompt_build_time_ms": 0.0,
+            "llm_time_ms": 0.0,
+            "total_time_ms": retrieval_time_ms,
+        },
+        detail=detail,
+    )
+
+
 def _solve_answer_text(response: AskResponse) -> str:
     answer = response.answer.strip() or NO_EVIDENCE
     if answer == NO_EVIDENCE:
@@ -132,10 +232,24 @@ def render_solve_response(response: SolveResponse) -> str:
         evidence = "无本地依据"
     if not sources:
         sources = "无本地来源"
+    if response.calculation_answer is not None and not response.calculation_answer.need_manual_input:
+        calculation = response.calculation_answer
+        return (
+            f"题型：\n{response.problem_type.value}\n\n"
+            f"计算类型：\n{calculation.calculation_type}\n\n"
+            f"解题策略：\n{response.strategy}\n\n"
+            f"公式：\n{calculation.formula}\n\n"
+            f"代入：\n{calculation.substitution}\n\n"
+            f"结果：\n{calculation.result_text}\n\n"
+            f"本地依据：\n{evidence}\n\n"
+            f"来源：\n{sources}\n\n"
+            "计算说明：\n数值结果来自 deterministic calculator；LLM 不参与也不能覆盖上述数值结果。"
+        )
+    note = f"{response.fallback_note}\n\n" if response.fallback_note else ""
     return (
         f"题型：\n{response.problem_type.value}\n\n"
         f"解题策略：\n{response.strategy}\n\n"
-        f"答案：\n{_solve_answer_text(ask_response)}\n\n"
+        f"答案：\n{note}{_solve_answer_text(ask_response)}\n\n"
         f"依据：\n{evidence}\n\n"
         f"来源：\n{sources}"
     )
