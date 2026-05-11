@@ -173,17 +173,20 @@ def render_sidebar() -> None:
         if pending_data_dir:
             st.session_state["data_dir_input"] = pending_data_dir
 
-        dir_col, pick_col = st.columns([5, 1])
-        data_dir = dir_col.text_input("资料目录", key="data_dir_input")
-        if pick_col.button("选择文件夹", use_container_width=True):
-            result = pick_folder()
-            if result.selected_path:
-                st.session_state["pending_data_dir_input"] = result.selected_path
-                st.rerun()
-            elif result.cancelled:
-                st.info("已取消选择文件夹。")
-            else:
-                st.warning(f"无法打开文件夹选择器：{result.error}")
+        dir_col, pick_col = st.columns([10, 1])
+        with dir_col:
+            data_dir = st.text_input("资料目录", key="data_dir_input")
+        with pick_col:
+            st.write("")
+            if st.button("📁", key="pick_data_dir_button", help="选择资料文件夹", use_container_width=True):
+                result = pick_folder()
+                if result.selected_path:
+                    st.session_state["pending_data_dir_input"] = result.selected_path
+                    st.rerun()
+                elif result.cancelled:
+                    st.info("已取消选择文件夹。")
+                else:
+                    st.warning(f"无法打开文件夹选择器：{result.error}")
         auto_embed_after_ingest = st.checkbox(
             "索引后自动更新语义索引",
             value=True,
