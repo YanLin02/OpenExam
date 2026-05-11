@@ -5,9 +5,11 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from openexam.calculators.cnn import conv2d_output_size, conv2d_param_count, linear_param_count, pool2d_output_size
-from openexam.calculators.losses import cross_entropy_from_logits, softmax
+from openexam.calculators.losses import cross_entropy_from_logits, mse, softmax
 from openexam.calculators.metrics import classification_metrics
 from openexam.calculators.optimization import gradient_descent_step
+from openexam.calculators.sequence import lstm_param_count, simple_rnn_param_count
+from openexam.calculators.transformer import attention_qkv_param_count, multihead_attention_param_count
 
 
 @dataclass(frozen=True)
@@ -188,6 +190,57 @@ def _parse_gradient_descent(question: str) -> CalculationParseResult:
     return CalculationParseResult("gradient_descent_step", {"w": w, "grad": grad, "lr": lr})
 
 
+def _float_list_after(label_pattern: str, text: str) -> list[float] | None:
+    match = re.search(label_pattern + r"\s*=\s*\[([^\]]+)\]", text, flags=re.IGNORECASE)
+    if not match:
+        return None
+    return [float(part) for part in re.findall(_NUMBER, match.group(1))]
+
+
+def _parse_mse(question: str) -> CalculationParseResult:
+    y_true = _float_list_after(r"(?:y_true|true|真实值)", question)
+    y_pred = _float_list_after(r"(?:y_pred|pred|预测值)", question)
+    if y_true is None or y_pred is None:
+        return CalculationParseResult("mse", need_manual_input=True, reason="missing y_true or y_pred")
+    return CalculationParseResult("mse", {"y_true": y_true, "y_pred": y_pred})
+
+
+def _parse_rnn_params(question: str) -> CalculationParseResult:
+    input_size = _first_int(r"(?:input_size|输入维度|输入大小)\s*=?\s*(\d+)", question)
+    hidden_size = _first_int(r"(?:hidden_size|隐藏维度|隐状态维度|隐藏层大小)\s*=?\s*(\d+)", question)
+    output_size = _first_int(r"(?:output_size|输出维度|输出大小)\s*=?\s*(\d+)", question)
+    if input_size is None or hidden_size is None:
+        return CalculationParseResult("simple_rnn_param_count", need_manual_input=True, reason="missing input_size or hidden_size")
+    bias = not bool(re.search(r"(?:无|不含|没有)\s*bias|无偏置|不含偏置", question, flags=re.IGNORECASE))
+    return CalculationParseResult(
+        "simple_rnn_param_count",
+        {"input_size": input_size, "hidden_size": hidden_size, "output_size": output_size, "bias": bias},
+    )
+
+
+def _parse_lstm_params(question: str) -> CalculationParseResult:
+    input_size = _first_int(r"(?:input_size|输入维度|输入大小)\s*=?\s*(\d+)", question)
+    hidden_size = _first_int(r"(?:hidden_size|隐藏维度|隐状态维度|隐藏层大小)\s*=?\s*(\d+)", question)
+    if input_size is None or hidden_size is None:
+        return CalculationParseResult("lstm_param_count", need_manual_input=True, reason="missing input_size or hidden_size")
+    bias = not bool(re.search(r"(?:无|不含|没有)\s*bias|无偏置|不含偏置", question, flags=re.IGNORECASE))
+    return CalculationParseResult("lstm_param_count", {"input_size": input_size, "hidden_size": hidden_size, "bias": bias})
+
+
+def _parse_attention_params(question: str, calculation_type: str) -> CalculationParseResult:
+    d_model = _first_int(r"(?:d_model|模型维度|隐藏维度)\s*=?\s*(\d+)", question)
+    if d_model is None:
+        return CalculationParseResult(calculation_type, need_manual_input=True, reason="missing d_model")
+    bias = not bool(re.search(r"(?:无|不含|没有)\s*bias|无偏置|不含偏置", question, flags=re.IGNORECASE))
+    if calculation_type == "attention_qkv_param_count":
+        return CalculationParseResult(calculation_type, {"d_model": d_model, "bias": bias})
+    include_output_projection = not bool(re.search(r"不含输出投影|不包括输出投影|without output projection", question, flags=re.IGNORECASE))
+    return CalculationParseResult(
+        calculation_type,
+        {"d_model": d_model, "include_output_projection": include_output_projection, "bias": bias},
+    )
+
+
 def parse_calculation_question(question: str) -> CalculationParseResult:
     normalized = _normalize(question)
     calculation_type = detect_calculation_type(normalized)
@@ -205,6 +258,14 @@ def parse_calculation_question(question: str) -> CalculationParseResult:
         return _parse_metrics(normalized.lower())
     if calculation_type == "gradient_descent_step":
         return _parse_gradient_descent(normalized.lower())
+    if calculation_type == "mse":
+        return _parse_mse(normalized)
+    if calculation_type == "simple_rnn_param_count":
+        return _parse_rnn_params(normalized)
+    if calculation_type == "lstm_param_count":
+        return _parse_lstm_params(normalized)
+    if calculation_type in {"attention_qkv_param_count", "multihead_attention_param_count"}:
+        return _parse_attention_params(normalized, calculation_type)
     return CalculationParseResult(calculation_type, need_manual_input=True, reason="unsupported or ambiguous calculation question")
 
 
@@ -285,6 +346,25 @@ def solve_calculation_question(question: str) -> CalculationAnswer:
             result_text=f"梯度下降一步后的 w = {_format_float(new_w)}。",
             values={"w_new": new_w, **params},
         )
+    if parsed.calculation_type == "mse":
+        value = mse(**params)
+        formula = "MSE = (1/n) * sum_i (y_true_i - y_pred_i)^2"
+        substitution = f"MSE = mean(({params['y_true']} - {params['y_pred']})^2) = {_format_float(value)}"
+        return CalculationAnswer(
+            calculation_type=parsed.calculation_type,
+            formula=formula,
+            substitution=substitution,
+            result_text=f"MSE = {_format_float(value)}。",
+            values={"mse": value, **params},
+        )
+    if parsed.calculation_type == "simple_rnn_param_count":
+        return _answer_from_dict(parsed.calculation_type, simple_rnn_param_count(**params))
+    if parsed.calculation_type == "lstm_param_count":
+        return _answer_from_dict(parsed.calculation_type, lstm_param_count(**params))
+    if parsed.calculation_type == "attention_qkv_param_count":
+        return _answer_from_dict(parsed.calculation_type, attention_qkv_param_count(**params))
+    if parsed.calculation_type == "multihead_attention_param_count":
+        return _answer_from_dict(parsed.calculation_type, multihead_attention_param_count(**params))
     return CalculationAnswer(
         calculation_type=parsed.calculation_type,
         formula="",

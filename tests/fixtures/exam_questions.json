@@ -1,0 +1,282 @@
+[
+  {
+    "id": "calc_cnn_output_32_5",
+    "question": "给定输入 32x32，卷积核 5x5，stride=1，padding=0，输出尺寸是多少？",
+    "expected_problem_type": "calculation",
+    "expected_subtype": "conv2d_output_size",
+    "expected_contains": ["输出尺寸为 28 x 28", "conv2d_output_size"],
+    "expected_not_contains": ["未能可靠解析"],
+    "expected_llm_called": false,
+    "notes": "CNN valid convolution output size."
+  },
+  {
+    "id": "calc_pool_output_32_2",
+    "question": "输入 32x32，池化核 2x2，stride=2，padding=0，输出尺寸是多少？",
+    "expected_problem_type": "calculation",
+    "expected_subtype": "pool2d_output_size",
+    "expected_contains": ["输出尺寸为 16 x 16", "pool2d_output_size"],
+    "expected_not_contains": ["未能可靠解析"],
+    "expected_llm_called": false,
+    "notes": "Pooling output size."
+  },
+  {
+    "id": "calc_conv_params_3_64_3",
+    "question": "卷积层输入通道 3，输出通道 64，卷积核 3x3，参数量是多少？",
+    "expected_problem_type": "calculation",
+    "expected_subtype": "conv2d_param_count",
+    "expected_contains": ["参数量为 1792", "conv2d_param_count"],
+    "expected_not_contains": ["未能可靠解析"],
+    "expected_llm_called": false,
+    "notes": "Conv params with bias."
+  },
+  {
+    "id": "calc_linear_params_784_10",
+    "question": "全连接层输入 784，输出 10，参数量是多少？",
+    "expected_problem_type": "calculation",
+    "expected_subtype": "linear_param_count",
+    "expected_contains": ["参数量为 7850", "linear_param_count"],
+    "expected_not_contains": ["未能可靠解析"],
+    "expected_llm_called": false,
+    "notes": "Linear params with bias."
+  },
+  {
+    "id": "calc_softmax_ce_logits",
+    "question": "logits=[2,1,0]，真实类别为 0，求 softmax 和交叉熵",
+    "expected_problem_type": "calculation",
+    "expected_subtype": "softmax_cross_entropy",
+    "expected_contains": ["softmax", "交叉熵", "0.407606"],
+    "expected_not_contains": ["未能可靠解析"],
+    "expected_llm_called": false,
+    "notes": "Stable softmax and CE from logits."
+  },
+  {
+    "id": "calc_mse",
+    "question": "y_true=[1,0,1]，y_pred=[0.8,0.2,0.6]，求 MSE",
+    "expected_problem_type": "calculation",
+    "expected_subtype": "mse",
+    "expected_contains": ["MSE = 0.08", "mse"],
+    "expected_not_contains": ["未能可靠解析"],
+    "expected_llm_called": false,
+    "notes": "MSE from two numeric lists."
+  },
+  {
+    "id": "calc_metrics_binary",
+    "question": "TP=80, FP=10, TN=90, FN=20，求 accuracy precision recall F1",
+    "expected_problem_type": "calculation",
+    "expected_subtype": "classification_metrics",
+    "expected_contains": ["accuracy=0.85", "precision=0.888889", "recall=0.8"],
+    "expected_not_contains": ["未能可靠解析"],
+    "expected_llm_called": false,
+    "notes": "Binary classification metrics."
+  },
+  {
+    "id": "calc_gradient_descent",
+    "question": "w=2, grad=0.5, lr=0.1，梯度下降一步后的 w 是多少？",
+    "expected_problem_type": "calculation",
+    "expected_subtype": "gradient_descent_step",
+    "expected_contains": ["w = 1.95", "gradient_descent_step"],
+    "expected_not_contains": ["未能可靠解析"],
+    "expected_llm_called": false,
+    "notes": "One-step gradient descent."
+  },
+  {
+    "id": "calc_rnn_params",
+    "question": "简单 RNN input_size=10, hidden_size=20, output_size=5，参数量是多少？",
+    "expected_problem_type": "calculation",
+    "expected_subtype": "simple_rnn_param_count",
+    "expected_contains": ["简单 RNN 参数量为 725", "simple_rnn_param_count"],
+    "expected_not_contains": ["未能可靠解析"],
+    "expected_llm_called": false,
+    "notes": "Simple RNN params with output layer."
+  },
+  {
+    "id": "calc_lstm_params",
+    "question": "LSTM input_size=10, hidden_size=20，参数量是多少？",
+    "expected_problem_type": "calculation",
+    "expected_subtype": "lstm_param_count",
+    "expected_contains": ["LSTM 参数量为 2480", "lstm_param_count"],
+    "expected_not_contains": ["未能可靠解析"],
+    "expected_llm_called": false,
+    "notes": "LSTM four-gate params."
+  },
+  {
+    "id": "calc_transformer_qkv_params",
+    "question": "Transformer QKV d_model=512，参数量是多少？",
+    "expected_problem_type": "calculation",
+    "expected_subtype": "attention_qkv_param_count",
+    "expected_contains": ["Q/K/V 三个线性层参数量为 787968", "attention_qkv_param_count"],
+    "expected_not_contains": ["未能可靠解析"],
+    "expected_llm_called": false,
+    "notes": "Transformer QKV params."
+  },
+  {
+    "id": "design_cnn_digits",
+    "question": "设计一个 CNN 完成手写数字识别任务",
+    "expected_problem_type": "design",
+    "expected_subtype": "image_classification",
+    "expected_contains": ["答题结构", "网络结构", "损失函数"],
+    "expected_not_contains": [],
+    "expected_llm_called": true,
+    "notes": "Image classification design template."
+  },
+  {
+    "id": "design_overfitting",
+    "question": "设计一个方案缓解神经网络过拟合",
+    "expected_problem_type": "design",
+    "expected_subtype": "overfitting_solution",
+    "expected_contains": ["答题结构", "Dropout", "Early stopping"],
+    "expected_not_contains": [],
+    "expected_llm_called": true,
+    "notes": "Overfitting solution template."
+  },
+  {
+    "id": "design_gan_training",
+    "question": "设计一个 GAN 生成图像的训练流程",
+    "expected_problem_type": "design",
+    "expected_subtype": "generative_model",
+    "expected_contains": ["答题结构", "生成器/编码器结构", "训练流程"],
+    "expected_not_contains": [],
+    "expected_llm_called": true,
+    "notes": "Generative model template."
+  },
+  {
+    "id": "design_training_pipeline",
+    "question": "设计一个训练流程，包括优化器和验证集",
+    "expected_problem_type": "design",
+    "expected_subtype": "training_pipeline",
+    "expected_contains": ["答题结构", "优化器", "验证与测试"],
+    "expected_not_contains": [],
+    "expected_llm_called": true,
+    "notes": "Training pipeline template."
+  },
+  {
+    "id": "design_lstm_text",
+    "question": "设计一个 LSTM 文本分类模型",
+    "expected_problem_type": "design",
+    "expected_subtype": "sequence_modeling",
+    "expected_contains": ["答题结构", "模型结构选择", "评价指标"],
+    "expected_not_contains": [],
+    "expected_llm_called": true,
+    "notes": "Sequence modeling template."
+  },
+  {
+    "id": "deriv_softmax_ce",
+    "question": "推导 softmax 交叉熵的梯度",
+    "expected_problem_type": "derivation",
+    "expected_subtype": "softmax_cross_entropy",
+    "expected_contains": ["推导结构", "Softmax 定义", "对 logits 求导"],
+    "expected_not_contains": [],
+    "expected_llm_called": true,
+    "notes": "Softmax CE derivation template."
+  },
+  {
+    "id": "deriv_backprop",
+    "question": "推导误差反向传播算法的核心步骤",
+    "expected_problem_type": "derivation",
+    "expected_subtype": "backpropagation",
+    "expected_contains": ["推导结构", "链式法则", "参数更新"],
+    "expected_not_contains": [],
+    "expected_llm_called": true,
+    "notes": "Backpropagation derivation template."
+  },
+  {
+    "id": "deriv_cnn_dimension",
+    "question": "推导卷积输出尺寸公式",
+    "expected_problem_type": "derivation",
+    "expected_subtype": "cnn_dimension",
+    "expected_contains": ["推导结构", "输出尺寸公式", "padding"],
+    "expected_not_contains": [],
+    "expected_llm_called": true,
+    "notes": "CNN dimension formula derivation."
+  },
+  {
+    "id": "deriv_gradient_descent",
+    "question": "推导梯度下降更新公式",
+    "expected_problem_type": "derivation",
+    "expected_subtype": "gradient_descent",
+    "expected_contains": ["推导结构", "更新公式", "学习率作用"],
+    "expected_not_contains": [],
+    "expected_llm_called": true,
+    "notes": "Gradient descent derivation template."
+  },
+  {
+    "id": "compare_cnn_transformer",
+    "question": "比较 CNN 和 Transformer 的区别",
+    "expected_problem_type": "compare",
+    "expected_subtype": "model_comparison",
+    "expected_contains": ["比较维度", "长距离依赖", "考试总结"],
+    "expected_not_contains": [],
+    "expected_llm_called": true,
+    "notes": "Model comparison template."
+  },
+  {
+    "id": "compare_sgd_adam",
+    "question": "比较 SGD 和 Adam",
+    "expected_problem_type": "compare",
+    "expected_subtype": "optimizer_comparison",
+    "expected_contains": ["比较维度", "收敛速度", "稳定性"],
+    "expected_not_contains": [],
+    "expected_llm_called": true,
+    "notes": "Optimizer comparison template."
+  },
+  {
+    "id": "compare_mse_ce",
+    "question": "比较 MSE 和交叉熵",
+    "expected_problem_type": "compare",
+    "expected_subtype": "loss_comparison",
+    "expected_contains": ["比较维度", "数学形式", "梯度性质"],
+    "expected_not_contains": [],
+    "expected_llm_called": true,
+    "notes": "Loss comparison template."
+  },
+  {
+    "id": "compare_dropout_l2",
+    "question": "比较 dropout 和 L2 正则化",
+    "expected_problem_type": "compare",
+    "expected_subtype": "regularization_comparison",
+    "expected_contains": ["比较维度", "作用机制", "训练/推理差异"],
+    "expected_not_contains": [],
+    "expected_llm_called": true,
+    "notes": "Regularization comparison template."
+  },
+  {
+    "id": "compare_metrics",
+    "question": "比较 accuracy precision recall F1 的区别",
+    "expected_problem_type": "compare",
+    "expected_subtype": "metric_comparison",
+    "expected_contains": ["比较维度", "关注错误类型", "类别不平衡适用性"],
+    "expected_not_contains": [],
+    "expected_llm_called": true,
+    "notes": "Metric comparison template."
+  },
+  {
+    "id": "concept_bp",
+    "question": "简述 BP 算法",
+    "expected_problem_type": "concept",
+    "expected_subtype": null,
+    "expected_contains": ["BP"],
+    "expected_not_contains": [],
+    "expected_llm_called": null,
+    "notes": "Concept classification only."
+  },
+  {
+    "id": "concept_dropout",
+    "question": "简述 Dropout 作用",
+    "expected_problem_type": "concept",
+    "expected_subtype": null,
+    "expected_contains": ["Dropout"],
+    "expected_not_contains": [],
+    "expected_llm_called": null,
+    "notes": "Concept classification only."
+  },
+  {
+    "id": "concept_attention",
+    "question": "简述注意力机制作用",
+    "expected_problem_type": "concept",
+    "expected_subtype": null,
+    "expected_contains": ["注意力"],
+    "expected_not_contains": [],
+    "expected_llm_called": null,
+    "notes": "Concept classification only."
+  }
+]

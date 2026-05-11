@@ -1,0 +1,108 @@
+# OpenExam Solve Gap Report
+
+This report tracks the current exam-solve coverage and the known gaps exposed by `tests/fixtures/exam_questions.json`.
+
+## Supported Question Types
+
+OpenExam `solve` currently routes these problem types:
+
+- `calculation`: deterministic calculators first; no LLM is allowed to change numeric results.
+- `design`: structured design templates, then local Ask/LLM for prose.
+- `derivation`: structured derivation templates, then local Ask/LLM for prose.
+- `compare`: structured comparison templates, then local Ask/LLM for prose.
+- `concept` / `short_answer`: local Ask fallback with evidence policy.
+
+## Supported Calculators
+
+Current deterministic calculator coverage:
+
+- CNN and pooling output size.
+- Conv2D parameter count.
+- Linear layer parameter count.
+- Softmax and cross entropy from logits.
+- MSE.
+- Accuracy, precision, recall, and F1 from TP/FP/TN/FN.
+- One-step gradient descent update.
+- Simple RNN parameter count.
+- LSTM parameter count.
+- Transformer QKV parameter count.
+- Multi-head attention parameter count.
+
+## Parser Coverage
+
+The parser intentionally covers common structured exam formats, not arbitrary prose. Stable examples include:
+
+- `输入 32x32，卷积核 5x5，stride=1，padding=0`.
+- `输入为 28×28，卷积核 5×5，步长 1，无填充`.
+- `卷积层输入通道 3，输出通道 64，卷积核 3x3`.
+- `全连接层输入 784，输出 10`.
+- `logits=[2,1,0]，真实类别为 0`.
+- `y_true=[...], y_pred=[...]`.
+- `TP=80, FP=10, TN=90, FN=20`.
+- `w=2, grad=0.5, lr=0.1`.
+- `input_size=10, hidden_size=20, output_size=5`.
+- `d_model=512`.
+
+## Unstable Or Unsupported Inputs
+
+These formats are not yet reliably parsed:
+
+- Multi-layer network parameter totals described only in prose.
+- CNN output shapes with batch/channel layout inference such as `NCHW` or `NHWC`.
+- Non-square tensors written without clear labels.
+- Optimizer updates beyond basic scalar gradient descent.
+- Confusion matrices written as a 2x2 matrix without TP/FP/TN/FN labels.
+- Multi-class macro/micro precision, recall, and F1.
+- Attention parameter questions with separate `d_k`, `d_v`, or per-head dimensions.
+- Loss questions that require symbolic gradients rather than numeric MSE or cross entropy.
+
+When parsing is unreliable, `solve` should return a manual-input fallback instead of guessing.
+
+## Next Calculators And Parsers
+
+Recommended next additions:
+
+- CNN shape parser for `C x H x W`, `N x C x H x W`, and channel-preserving output text.
+- Multi-layer CNN/MLP parameter count aggregation.
+- Confusion-matrix parser for 2x2 table formats.
+- Macro/micro/weighted classification metrics.
+- Adam and momentum SGD one-step update calculators.
+- Attention parameter parser with `num_heads`, `d_k`, `d_v`, and output projection variants.
+- Numeric binary cross entropy and negative log likelihood helpers.
+
+## Template Limitations
+
+Design, derivation, and compare templates improve structure but still rely on local Ask/LLM for prose. They do not verify factual completeness beyond retrieved local context and evidence-policy behavior.
+
+- Design templates may need manual adaptation for unusual constraints, such as latency, memory, or deployment requirements.
+- Derivation templates provide visible exam steps but do not perform symbolic algebra checking.
+- Compare templates enforce dimensions but cannot guarantee all course-specific emphasis is covered unless the local corpus contains it.
+
+## Recommended Exam Usage
+
+- Use directly for parseable `calculation` questions. Numeric results come from deterministic calculators.
+- For complex `calculation`, rewrite the problem with explicit structured parameters or pass `--problem-type calculation`.
+- For `design`, `derivation`, and `compare`, use `solve` with `--evidence-policy warn` so weak local evidence remains visible.
+- Treat generated prose as an exam-answer draft and adjust it to the exact wording and marking rubric.
+
+## Regression Tests
+
+The regression fixture is:
+
+```text
+tests/fixtures/exam_questions.json
+```
+
+Run all tests:
+
+```bash
+python3 -m pytest
+```
+
+Run only the exam regression suite:
+
+```bash
+python3 -m pytest tests/test_exam_regression.py
+```
+
+To add a new exam question, append one fixture entry with stable `expected_contains` keywords. If the test fails, decide whether the failure is a classification rule gap, parser/calculator gap, template subtype gap, or expected fixture wording issue.

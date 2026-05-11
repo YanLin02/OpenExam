@@ -201,6 +201,14 @@ In the Streamlit UI, choose `Solve exam problem` to submit one exam problem to i
 
 The output is a study and exam-answer draft. Adjust the level of detail and section emphasis to match the exact question wording.
 
+Solve has a small exam regression suite in `tests/fixtures/exam_questions.json`, covering calculation, design, derivation, compare, concept, and short-answer style prompts. Run it with:
+
+```bash
+python3 -m pytest tests/test_exam_regression.py
+```
+
+To add a new exam case, append an entry with a stable `id`, `question`, `expected_problem_type`, optional `expected_subtype`, and short `expected_contains` keywords. If a fixture fails, first identify whether the gap is classification, parser/calculator coverage, template subtype routing, or render formatting; then patch the smallest relevant layer. The current capability and gap list is tracked in `docs/SOLVE_GAP_REPORT.md`.
+
 ## Semantic Search
 
 Semantic search is optional. It uses a local Ollama embedding model, with `bge-m3` as the default model.
