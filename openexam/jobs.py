@@ -10,11 +10,13 @@ from openexam.ask import AnswerDetail, AskResponse, EvidencePolicy, ask_question
 from openexam.config import AppConfig, DEFAULT_CONFIG
 from openexam.models import SearchResult
 from openexam.search import SearchMode, search_index
+from openexam.solve import SolveResponse, solve_question
 from openexam.sources import SearchScope, SourcePreference
 
 
 JobStatus = Literal["queued", "running", "done", "error"]
 JobKind = Literal["search", "ask"]
+AnswerMode = Literal["ask", "solve"]
 
 
 @dataclass
@@ -40,6 +42,7 @@ class JobRecord:
 
 SearchFunction = Callable[..., list[SearchResult]]
 AskFunction = Callable[..., AskResponse]
+SolveFunction = Callable[..., SolveResponse]
 
 
 def make_job_id() -> str:
@@ -119,8 +122,24 @@ def _run_ask_job(
     llm_model: str,
     evidence_policy: EvidencePolicy,
     detail: AnswerDetail,
+    answer_mode: AnswerMode,
     ask_fn: AskFunction,
-) -> AskResponse:
+    solve_fn: SolveFunction,
+) -> AskResponse | SolveResponse:
+    if answer_mode == "solve":
+        return solve_fn(
+            question,
+            mode="auto",
+            config=config,
+            search_mode=mode,
+            scope=scope,
+            prefer=prefer,
+            per_file_cap=per_file_cap,
+            top_k=top_k,
+            llm_model=llm_model,
+            evidence_policy=evidence_policy,
+            detail=detail,
+        )
     return ask_fn(
         question,
         config=config,
@@ -149,7 +168,9 @@ def submit_ask_job(
     llm_model: str = DEFAULT_CONFIG.llm_model,
     evidence_policy: EvidencePolicy = "warn",
     detail: AnswerDetail = "standard",
+    answer_mode: AnswerMode = "ask",
     ask_fn: AskFunction = ask_question,
+    solve_fn: SolveFunction = solve_question,
 ) -> JobRecord:
     effective_top_k = top_k if top_k is not None else config.llm_context_top_k
     job = JobRecord(job_id=make_job_id(), kind="ask", input_text=question, signature=signature)
@@ -165,7 +186,9 @@ def submit_ask_job(
         llm_model=llm_model,
         evidence_policy=evidence_policy,
         detail=detail,
+        answer_mode=answer_mode,
         ask_fn=ask_fn,
+        solve_fn=solve_fn,
     )
     return job
 

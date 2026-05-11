@@ -22,6 +22,8 @@ from openexam.jobs import (
     toggle_job_collapsed,
     update_job_from_future,
 )
+from openexam.problem_types import ProblemType
+from openexam.solve import SolveResponse
 
 
 def wait_for_job(job: JobRecord, timeout: float = 2.0) -> JobRecord:
@@ -93,6 +95,46 @@ def test_submit_ask_job_with_fake_ask() -> None:
     assert job.status == "done"
     assert isinstance(job.result, AskResponse)
     assert job.result.answer == "answer"
+    assert job.error is None
+
+
+def test_submit_ask_job_can_use_solve_mode() -> None:
+    def fake_solve(question, *, mode, search_mode, scope, prefer, per_file_cap, top_k, llm_model, evidence_policy, detail, **kwargs):
+        ask_response = AskResponse(
+            question=question,
+            answer="solve answer",
+            results=[],
+            search_mode=search_mode,
+            scope=scope,
+            prefer=prefer,
+            per_file_cap=per_file_cap,
+            top_k=top_k,
+            llm_model=llm_model,
+            llm_called=False,
+            evidence_status="none",
+            evidence_policy=evidence_policy,
+            missing_phrases=[],
+            timing={"total_time_ms": 1.0},
+            detail=detail,
+        )
+        return SolveResponse(
+            question=question,
+            problem_type=ProblemType.CALCULATION,
+            strategy="先识别已知量。",
+            ask_response=ask_response,
+            requested_mode=mode,
+        )
+
+    executor = create_ask_executor(max_workers=1)
+    try:
+        job = submit_ask_job(executor, "输出尺寸是多少", signature="sig", answer_mode="solve", solve_fn=fake_solve)
+        wait_for_job(job)
+    finally:
+        executor.shutdown(wait=True)
+
+    assert job.status == "done"
+    assert isinstance(job.result, SolveResponse)
+    assert job.result.problem_type == ProblemType.CALCULATION
     assert job.error is None
 
 

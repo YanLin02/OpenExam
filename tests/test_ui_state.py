@@ -66,6 +66,36 @@ def test_ask_signature_changes_when_parameters_change() -> None:
     assert base != changed
 
 
+def test_ask_signature_tracks_answer_mode() -> None:
+    ask = build_ask_signature(
+        query="q",
+        answer_mode="ask",
+        mode="hybrid",
+        scope="all",
+        prefer="lecture",
+        per_file_cap=2,
+        top_k=6,
+        llm_model="qwen3:8b",
+        evidence_policy="warn",
+        detail="standard",
+    )
+    solve = build_ask_signature(
+        query="q",
+        answer_mode="solve",
+        mode="hybrid",
+        scope="all",
+        prefer="lecture",
+        per_file_cap=2,
+        top_k=6,
+        llm_model="qwen3:8b",
+        evidence_policy="warn",
+        detail="standard",
+    )
+
+    assert ask != solve
+    assert '"answer_mode": "solve"' in solve
+
+
 def test_search_signature_changes_when_parameters_change() -> None:
     base = build_search_signature(query="q", mode="hybrid", scope="all", prefer="none", per_file_cap=0, top_k=10)
     changed = build_search_signature(query="q", mode="keyword", scope="all", prefer="none", per_file_cap=0, top_k=10)

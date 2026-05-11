@@ -7,6 +7,7 @@ from typing import Any
 def build_ask_signature(
     *,
     query: str,
+    answer_mode: str = "ask",
     mode: str,
     scope: str,
     prefer: str,
@@ -18,6 +19,7 @@ def build_ask_signature(
 ) -> str:
     payload: dict[str, Any] = {
         "query": query,
+        "answer_mode": answer_mode,
         "mode": mode,
         "scope": scope,
         "prefer": prefer,

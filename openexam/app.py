@@ -39,6 +39,7 @@ from openexam.jobs import (
 from openexam.models import SearchResult
 from openexam.ollama_utils import choose_default_llm_model, ensure_ollama_running, list_ollama_models, stop_ollama_server
 from openexam.pdf_preview import PdfPreviewError, render_pdf_page
+from openexam.solve import SolveResponse, render_solve_response
 from openexam.ui_state import (
     build_ask_signature,
     build_search_signature,
@@ -412,6 +413,10 @@ def render_ask_job_result(job: JobRecord, result_key_prefix: str) -> None:
     if job.result is None:
         st.error("Ask job returned an empty result.")
         return
+    if isinstance(job.result, SolveResponse):
+        st.markdown(render_solve_response(job.result).replace("\n", "  \n"))
+        render_ask_details(job.result.ask_response, key_prefix=result_key_prefix)
+        return
     render_ask_summary(job.result)
     render_ask_details(job.result, key_prefix=result_key_prefix)
 
@@ -448,7 +453,7 @@ def render_job_queue(kind: str) -> None:
         render_job_card(job, result_key_prefix=job_preview_prefix(kind, job.job_id))
 
 
-def render_controls() -> tuple[str, str, str, int, str, int, str, str, str, bool, bool, bool]:
+def render_controls() -> tuple[str, str, str, int, str, int, str, str, str, str, str, bool, bool, bool]:
     top_cols = st.columns([2, 2, 2, 1])
     action = top_cols[0].radio("Action", options=["Search", "Ask local AI"], horizontal=True)
     is_ask = action == "Ask local AI"
@@ -471,7 +476,7 @@ def render_controls() -> tuple[str, str, str, int, str, int, str, str, str, bool
     refresh_clicked = query_cols[3].button("刷新状态", use_container_width=True)
 
     if is_ask:
-        param_cols = st.columns([2, 1, 2, 2, 3])
+        param_cols = st.columns([1.4, 1, 1.4, 1.6, 1.6, 3])
     else:
         param_cols = st.columns([2, 1])
     prefer = param_cols[0].selectbox("Prefer", options=["none", "lecture", "textbook_ocr"], index=1 if is_ask else 0)
@@ -481,17 +486,19 @@ def render_controls() -> tuple[str, str, str, int, str, int, str, str, str, bool
     evidence_policy = "warn"
     detail = "standard"
     llm_model = DEFAULT_CONFIG.llm_model
+    answer_mode = "ask"
     if is_ask:
-        evidence_policy = param_cols[2].selectbox("Evidence", options=["warn", "strict", "open"], index=0)
-        detail_label = param_cols[3].selectbox("Detail", options=["简洁", "标准", "详细"], index=1)
+        answer_mode = param_cols[2].selectbox("Answer mode", options=["ask", "solve"], index=0)
+        evidence_policy = param_cols[3].selectbox("Evidence", options=["warn", "strict", "open"], index=0)
+        detail_label = param_cols[4].selectbox("Detail", options=["简洁", "标准", "详细"], index=1)
         detail = {"简洁": "concise", "标准": "standard", "详细": "detailed"}[detail_label]
         models, selected_llm = llm_model_options()
         if selected_llm is None:
-            param_cols[4].warning("未找到本地 LLM 模型。")
-            llm_model = param_cols[4].text_input("LLM model", value=DEFAULT_CONFIG.llm_model)
+            param_cols[5].warning("未找到本地 LLM 模型。")
+            llm_model = param_cols[5].text_input("LLM model", value=DEFAULT_CONFIG.llm_model)
         else:
             model_index = models.index(selected_llm) if selected_llm in models else 0
-            llm_model = param_cols[4].selectbox("LLM model", options=models, index=model_index)
+            llm_model = param_cols[5].selectbox("LLM model", options=models, index=model_index)
     return (
         action,
         query,
@@ -500,6 +507,7 @@ def render_controls() -> tuple[str, str, str, int, str, int, str, str, str, bool
         scope,
         int(per_file_cap),
         prefer,
+        answer_mode,
         evidence_policy,
         detail,
         llm_model,
@@ -548,6 +556,7 @@ def submit_ask_queue_job(
     per_file_cap: int,
     top_k: int,
     llm_model: str,
+    answer_mode: str,
     evidence_policy: str,
     detail: str,
 ) -> bool:
@@ -559,6 +568,7 @@ def submit_ask_queue_job(
         return False
     signature = build_ask_signature(
         query=question,
+        answer_mode=answer_mode,
         mode=mode,
         scope=scope,
         prefer=prefer,
@@ -579,11 +589,12 @@ def submit_ask_queue_job(
         per_file_cap=per_file_cap,
         top_k=top_k,
         llm_model=llm_model,
+        answer_mode=answer_mode,
         evidence_policy=evidence_policy,
         detail=detail,
     )
     session_jobs("ask_jobs").append(job)
-    st.success("已提交 Ask 任务。")
+    st.success(f"已提交 {'Solve' if answer_mode == 'solve' else 'Ask'} 任务。")
     return True
 
 
@@ -600,6 +611,7 @@ def main() -> None:
         scope,
         per_file_cap,
         prefer,
+        answer_mode,
         evidence_policy,
         detail,
         llm_model,
@@ -617,7 +629,7 @@ def main() -> None:
             mark_queue_input_for_clear(kind)
             rerun_app()
     elif submit_clicked:
-        if submit_ask_queue_job(query, mode, scope, prefer, per_file_cap, top_k, llm_model, evidence_policy, detail):
+        if submit_ask_queue_job(query, mode, scope, prefer, per_file_cap, top_k, llm_model, answer_mode, evidence_policy, detail):
             mark_queue_input_for_clear(kind)
             rerun_app()
     elif refresh_clicked:

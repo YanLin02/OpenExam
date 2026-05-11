@@ -12,6 +12,7 @@ from openexam.file_utils import file_uri, open_local_file, open_pdf_page_in_chro
 from openexam.ingest import ingest_directory
 from openexam.ollama_utils import ensure_ollama_running
 from openexam.search import search_index
+from openexam.solve import render_solve_response, solve_question
 
 
 def cmd_ingest(args: argparse.Namespace) -> int:
@@ -150,6 +151,53 @@ def cmd_ask(args: argparse.Namespace) -> int:
         f"total_time_ms={response.timing.get('total_time_ms', 0.0):.1f}\n"
     )
     print(render_ask_response(response))
+    return 0
+
+
+def cmd_solve(args: argparse.Namespace) -> int:
+    if not DEFAULT_CONFIG.db_path.exists():
+        print(f"Index not found: {DEFAULT_CONFIG.db_path}. Run ingest first.", file=sys.stderr)
+        return 2
+    if not args.question.strip():
+        print("Empty question. Please provide a question.", file=sys.stderr)
+        return 2
+    try:
+        response = solve_question(
+            args.question,
+            mode=args.problem_type,
+            config=DEFAULT_CONFIG,
+            search_mode=args.mode,
+            scope=args.scope,
+            prefer=args.prefer,
+            per_file_cap=args.per_file_cap,
+            top_k=args.top_k,
+            llm_model=args.llm_model,
+            evidence_policy=args.evidence_policy,
+            detail=args.detail,
+            auto_start_ollama=args.auto_start_ollama,
+        )
+    except EmbeddingError as exc:
+        print(f"Retrieval unavailable: {exc}", file=sys.stderr)
+        return 2
+    except LLMError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    ask_response = response.ask_response
+    print(
+        f"解题配置：problem_type={response.problem_type.value}, mode={ask_response.search_mode}, "
+        f"scope={ask_response.scope}, prefer={ask_response.prefer}, per_file_cap={ask_response.per_file_cap}, "
+        f"top_k={ask_response.top_k}, llm_model={ask_response.llm_model}, "
+        f"evidence_policy={ask_response.evidence_policy}, evidence_status={ask_response.evidence_status}, "
+        f"detail={ask_response.detail}\n"
+    )
+    print(
+        "timing: "
+        f"retrieval_time_ms={ask_response.timing.get('retrieval_time_ms', 0.0):.1f}, "
+        f"prompt_build_time_ms={ask_response.timing.get('prompt_build_time_ms', 0.0):.1f}, "
+        f"llm_time_ms={ask_response.timing.get('llm_time_ms', 0.0):.1f}, "
+        f"total_time_ms={ask_response.timing.get('total_time_ms', 0.0):.1f}\n"
+    )
+    print(render_solve_response(response))
     return 0
 
 
@@ -315,6 +363,65 @@ def build_parser() -> argparse.ArgumentParser:
     ask_parser.add_argument("--auto-start-ollama", dest="auto_start_ollama", action="store_true", default=True, help="Try to start `ollama serve` if Ollama is not reachable. Default: enabled.")
     ask_parser.add_argument("--no-auto-start-ollama", dest="auto_start_ollama", action="store_false", help="Do not try to start Ollama automatically.")
     ask_parser.set_defaults(func=cmd_ask)
+
+    solve_parser = subparsers.add_parser("solve", help="Solve an exam-style problem using classification plus local Ask fallback.")
+    solve_parser.add_argument("question", help="Exam problem to solve from local indexed chunks.")
+    solve_parser.add_argument(
+        "--problem-type",
+        choices=("auto", "concept", "calculation", "derivation", "design", "compare", "short_answer", "unknown"),
+        default="auto",
+        help="Problem type. auto classifies with lightweight local rules. Default: auto.",
+    )
+    solve_parser.add_argument(
+        "--mode",
+        choices=("keyword", "fuzzy", "hybrid", "semantic"),
+        default="hybrid",
+        help="Retrieval mode used before asking the local LLM.",
+    )
+    solve_parser.add_argument(
+        "--scope",
+        choices=("all", "lecture", "textbook_ocr", "other"),
+        default="all",
+        help="Restrict retrieved context to a source type. Default: all.",
+    )
+    solve_parser.add_argument(
+        "--prefer",
+        choices=("none", "lecture", "textbook_ocr"),
+        default="lecture",
+        help="Lightly boost a source type during retrieval. Default: lecture.",
+    )
+    solve_parser.add_argument(
+        "--per-file-cap",
+        type=int,
+        default=2,
+        help="Maximum retrieved chunks per file. 0 disables the cap. Default: 2.",
+    )
+    solve_parser.add_argument(
+        "--top-k",
+        type=int,
+        default=DEFAULT_CONFIG.llm_context_top_k,
+        help="Number of retrieved chunks to pass to the local LLM.",
+    )
+    solve_parser.add_argument(
+        "--evidence-policy",
+        choices=("strict", "warn", "open"),
+        default="warn",
+        help="How solve handles insufficient local evidence. strict refuses, warn answers with warnings, open answers even with no local evidence. Default: warn.",
+    )
+    solve_parser.add_argument(
+        "--detail",
+        choices=("concise", "standard", "detailed"),
+        default="standard",
+        help="Answer detail level. concise is short, standard is default, detailed gives a longer explanation.",
+    )
+    solve_parser.add_argument(
+        "--llm-model",
+        default=DEFAULT_CONFIG.llm_model,
+        help="Local Ollama LLM model to use. Default: qwen3:8b.",
+    )
+    solve_parser.add_argument("--auto-start-ollama", dest="auto_start_ollama", action="store_true", default=True, help="Try to start `ollama serve` if Ollama is not reachable. Default: enabled.")
+    solve_parser.add_argument("--no-auto-start-ollama", dest="auto_start_ollama", action="store_false", help="Do not try to start Ollama automatically.")
+    solve_parser.set_defaults(func=cmd_solve)
 
     status_parser = subparsers.add_parser("status", help="Show index statistics and recent failures.")
     status_parser.set_defaults(func=cmd_status)
