@@ -99,8 +99,16 @@ def solve_question(
     evidence_policy: EvidencePolicy = "warn",
     detail: AnswerDetail = "standard",
     auto_start_ollama: bool = True,
+    priority_answer_bank: bool | None = None,
 ) -> SolveResponse:
     problem_type = _coerce_problem_type(mode, question)
+    effective_priority_answer_bank = (
+        problem_type in {ProblemType.CONCEPT, ProblemType.SHORT_ANSWER}
+        if priority_answer_bank is None
+        else bool(priority_answer_bank)
+    )
+    if problem_type == ProblemType.CALCULATION:
+        effective_priority_answer_bank = False
     options = search_options or SolveSearchOptions(
         search_mode=search_mode,
         scope=scope,
@@ -120,6 +128,7 @@ def solve_question(
                 options=options,
                 evidence_policy=evidence_policy,
                 detail=detail,
+                priority_answer_bank=effective_priority_answer_bank,
             )
             return SolveResponse(
                 question=question,
@@ -142,6 +151,7 @@ def solve_question(
             evidence_policy=evidence_policy,
             detail=detail,
             auto_start_ollama=options.auto_start_ollama,
+            priority_answer_bank=effective_priority_answer_bank,
         )
         return SolveResponse(
             question=question,
@@ -175,6 +185,7 @@ def solve_question(
             evidence_policy=evidence_policy,
             detail=detail,
             auto_start_ollama=options.auto_start_ollama,
+            priority_answer_bank=effective_priority_answer_bank,
         )
         return SolveResponse(
             question=question,
@@ -208,6 +219,7 @@ def solve_question(
             evidence_policy=evidence_policy,
             detail=detail,
             auto_start_ollama=options.auto_start_ollama,
+            priority_answer_bank=effective_priority_answer_bank,
         )
         return SolveResponse(
             question=question,
@@ -241,6 +253,7 @@ def solve_question(
             evidence_policy=evidence_policy,
             detail=detail,
             auto_start_ollama=options.auto_start_ollama,
+            priority_answer_bank=effective_priority_answer_bank,
         )
         return SolveResponse(
             question=question,
@@ -265,6 +278,7 @@ def solve_question(
         evidence_policy=evidence_policy,
         detail=detail,
         auto_start_ollama=options.auto_start_ollama,
+        priority_answer_bank=effective_priority_answer_bank,
     )
     return SolveResponse(
         question=question,
@@ -283,6 +297,7 @@ def _calculation_evidence_response(
     options: SolveSearchOptions,
     evidence_policy: EvidencePolicy,
     detail: AnswerDetail,
+    priority_answer_bank: bool = False,
 ) -> AskResponse:
     effective_top_k = options.top_k if options.top_k is not None else config.llm_context_top_k
     results = []
@@ -299,6 +314,7 @@ def _calculation_evidence_response(
                 scope=options.scope,
                 prefer=options.prefer,
                 per_file_cap=options.per_file_cap,
+                priority_answer_bank=priority_answer_bank,
             )
             retrieval_time_ms = (time.perf_counter() - retrieval_start) * 1000
         except Exception:
@@ -325,6 +341,7 @@ def _calculation_evidence_response(
             "total_time_ms": retrieval_time_ms,
         },
         detail=detail,
+        priority_answer_bank=priority_answer_bank,
     )
 
 

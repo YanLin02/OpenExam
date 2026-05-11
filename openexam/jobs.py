@@ -126,6 +126,7 @@ def _run_ask_job(
     llm_model: str,
     evidence_policy: EvidencePolicy,
     detail: AnswerDetail,
+    priority_answer_bank: bool,
     answer_mode: AnswerMode,
     ask_fn: AskFunction,
     solve_fn: SolveFunction,
@@ -143,6 +144,7 @@ def _run_ask_job(
             llm_model=llm_model,
             evidence_policy=evidence_policy,
             detail=detail,
+            priority_answer_bank=priority_answer_bank,
         )
     return ask_fn(
         question,
@@ -155,6 +157,7 @@ def _run_ask_job(
         llm_model=llm_model,
         evidence_policy=evidence_policy,
         detail=detail,
+        priority_answer_bank=priority_answer_bank,
     )
 
 
@@ -172,6 +175,7 @@ def submit_ask_job(
     llm_model: str = DEFAULT_CONFIG.llm_model,
     evidence_policy: EvidencePolicy = "warn",
     detail: AnswerDetail = "standard",
+    priority_answer_bank: bool = False,
     answer_mode: AnswerMode = "ask",
     ask_fn: AskFunction = ask_question,
     solve_fn: SolveFunction = solve_question,
@@ -190,6 +194,7 @@ def submit_ask_job(
         llm_model=llm_model,
         evidence_policy=evidence_policy,
         detail=detail,
+        priority_answer_bank=priority_answer_bank,
         answer_mode=answer_mode,
         ask_fn=ask_fn,
         solve_fn=solve_fn,
@@ -210,6 +215,7 @@ def _run_solve_job(
     llm_model: str,
     evidence_policy: EvidencePolicy,
     detail: AnswerDetail,
+    priority_answer_bank: bool | None,
     solve_fn: SolveFunction,
 ) -> SolveResponse:
     return solve_fn(
@@ -224,6 +230,7 @@ def _run_solve_job(
         llm_model=llm_model,
         evidence_policy=evidence_policy,
         detail=detail,
+        priority_answer_bank=priority_answer_bank,
     )
 
 
@@ -242,6 +249,7 @@ def submit_solve_job(
     llm_model: str = DEFAULT_CONFIG.llm_model,
     evidence_policy: EvidencePolicy = "warn",
     detail: AnswerDetail = "standard",
+    priority_answer_bank: bool | None = None,
     solve_fn: SolveFunction = solve_question,
 ) -> JobRecord:
     effective_top_k = top_k if top_k is not None else config.llm_context_top_k
@@ -259,6 +267,7 @@ def submit_solve_job(
         llm_model=llm_model,
         evidence_policy=evidence_policy,
         detail=detail,
+        priority_answer_bank=priority_answer_bank,
         solve_fn=solve_fn,
     )
     return job

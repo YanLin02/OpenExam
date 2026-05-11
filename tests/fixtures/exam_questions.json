@@ -327,6 +327,7 @@
     "expected_contains": ["BP"],
     "expected_not_contains": [],
     "expected_llm_called": null,
+    "expected_priority_answer_bank": true,
     "notes": "Concept classification only."
   },
   {
@@ -337,6 +338,7 @@
     "expected_contains": ["Dropout"],
     "expected_not_contains": [],
     "expected_llm_called": null,
+    "expected_priority_answer_bank": true,
     "notes": "Concept classification only."
   },
   {
@@ -347,6 +349,62 @@
     "expected_contains": ["注意力"],
     "expected_not_contains": [],
     "expected_llm_called": null,
+    "expected_priority_answer_bank": true,
     "notes": "Concept classification only."
+  },
+  {
+    "id": "concept_dropout_definition",
+    "question": "什么是 Dropout？",
+    "expected_problem_type": "concept",
+    "expected_subtype": null,
+    "expected_contains": ["Dropout"],
+    "expected_not_contains": [],
+    "expected_llm_called": null,
+    "expected_priority_answer_bank": true,
+    "notes": "Exam answer bank priority concept fixture."
+  },
+  {
+    "id": "concept_cnn_definition",
+    "question": "什么是卷积神经网络？",
+    "expected_problem_type": "concept",
+    "expected_subtype": null,
+    "expected_contains": ["卷积神经网络"],
+    "expected_not_contains": [],
+    "expected_llm_called": null,
+    "expected_priority_answer_bank": true,
+    "notes": "Exam answer bank priority concept fixture."
+  },
+  {
+    "id": "concept_lstm_dependency",
+    "question": "简述 LSTM 为什么能缓解长时依赖。",
+    "expected_problem_type": "concept",
+    "expected_subtype": null,
+    "expected_contains": ["LSTM"],
+    "expected_not_contains": [],
+    "expected_llm_called": null,
+    "expected_priority_answer_bank": true,
+    "notes": "Exam answer bank priority concept fixture."
+  },
+  {
+    "id": "concept_gan_training",
+    "question": "简述 GAN 的训练过程。",
+    "expected_problem_type": "concept",
+    "expected_subtype": null,
+    "expected_contains": ["GAN"],
+    "expected_not_contains": [],
+    "expected_llm_called": null,
+    "expected_priority_answer_bank": true,
+    "notes": "Exam answer bank priority concept fixture."
+  },
+  {
+    "id": "concept_regularization_overfitting",
+    "question": "简述正则化为什么能缓解过拟合。",
+    "expected_problem_type": "concept",
+    "expected_subtype": null,
+    "expected_contains": ["正则化"],
+    "expected_not_contains": [],
+    "expected_llm_called": null,
+    "expected_priority_answer_bank": true,
+    "notes": "Exam answer bank priority concept fixture."
   }
 ]

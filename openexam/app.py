@@ -42,6 +42,10 @@ from openexam.models import SearchResult
 from openexam.ollama_utils import choose_default_llm_model, ensure_ollama_running, list_ollama_models, stop_ollama_server
 from openexam.pdf_preview import PdfPreviewError, render_pdf_page
 from openexam.problem_types import ProblemType, classify_problem
+from openexam.priority_sources import (
+    exam_answer_bank_label_for_result,
+    find_indexed_answer_bank_sources,
+)
 from openexam.solve import SolveResponse, render_solve_response
 from openexam.ui_state import (
     build_ask_signature,
@@ -109,6 +113,14 @@ def render_index_status() -> None:
             )
         )
         st.sidebar.caption(f"Embedding model: {semantic.model}. {semantic.message}")
+        answer_bank_sources = find_indexed_answer_bank_sources(DEFAULT_CONFIG)
+        st.sidebar.caption(f"考试答案库：已索引 {len(answer_bank_sources)}/3")
+        if answer_bank_sources:
+            with st.sidebar.expander("已检测到的考试答案库", expanded=False):
+                for source in answer_bank_sources:
+                    st.caption(source)
+        else:
+            st.sidebar.warning("未检测到考试答案库文件。请将三份文件放入资料目录并重新建立索引。")
         failures = failed_documents(conn, limit=10)
         if failures:
             with st.sidebar.expander("Recent failed files", expanded=False):
@@ -286,9 +298,11 @@ def render_search_result_card(result: SearchResult, index: int, key_prefix: str 
     card_key = f"{key_prefix}-{result.chunk_db_id}"
     with st.container(border=True):
         st.markdown(f"**{index}. {result.file_name}**")
+        priority_label = exam_answer_bank_label_for_result(result)
+        priority_text = f" | 考试答案库：{priority_label}" if priority_label else ""
         st.caption(
             f"{format_location(result)} | {result.source_type} | score {result.score:.2f} | "
-            f"{result.mode} | {result.match_type}"
+            f"{result.mode} | {result.match_type}{priority_text}"
         )
         st.write(result.snippet)
         render_path_expander(result.source_path, f"{card_key}-path")
@@ -309,7 +323,9 @@ def ask_answer_text(response) -> str:
 def render_source_card(result: SearchResult, index: int, key_prefix: str) -> None:
     with st.container(border=True):
         st.markdown(f"**[{index}] {result.file_name}**")
-        st.caption(f"{format_location(result)} | {result.source_type} | score {result.score:.2f}")
+        priority_label = exam_answer_bank_label_for_result(result)
+        priority_text = f" | 考试答案库：{priority_label}" if priority_label else ""
+        st.caption(f"{format_location(result)} | {result.source_type} | score {result.score:.2f}{priority_text}")
         st.write(format_evidence(result, index))
         render_path_expander(result.source_path, f"{key_prefix}-path-{index}-{result.chunk_db_id}")
         render_file_actions(result.source_path, result.page_number, f"{key_prefix}-{index}-{result.chunk_db_id}", result.chunk_db_id)
@@ -328,6 +344,8 @@ def render_ask_summary(response, stale: bool = False) -> None:
         f"llm {response.timing.get('llm_time_ms', 0.0):.1f} ms"
     )
     st.caption(f"{config_text} | llm_model={response.llm_model} | policy={response.evidence_policy} | detail={response.detail}")
+    if getattr(response, "priority_answer_bank", False):
+        st.caption("优先考试答案库：enabled")
     st.markdown(ask_answer_text(response).replace("\n", "  \n"))
 
 
@@ -478,7 +496,7 @@ def render_job_queue(kind: str) -> None:
         render_job_card(job, result_key_prefix=job_preview_prefix(kind, job.job_id))
 
 
-def render_controls() -> tuple[str, str, str, str, int, str, int, str, str, str, str, str, bool, bool, bool]:
+def render_controls() -> tuple[str, str, str, str, int, str, int, str, str, str, str, str, bool | None, bool, bool, bool]:
     top_cols = st.columns([2, 2, 2, 1])
     action = top_cols[0].radio("Action", options=["Search", "Ask local AI", "Solve exam problem"], horizontal=True)
     kind = {"Search": "search", "Ask local AI": "ask", "Solve exam problem": "solve"}[action]
@@ -520,6 +538,7 @@ def render_controls() -> tuple[str, str, str, str, int, str, int, str, str, str,
     detail = "standard"
     llm_model = DEFAULT_CONFIG.llm_model
     problem_type = "auto"
+    priority_answer_bank: bool | None = False
     if kind == "solve":
         problem_type = param_cols[2].selectbox(
             "Problem type",
@@ -536,6 +555,12 @@ def render_controls() -> tuple[str, str, str, str, int, str, int, str, str, str,
         else:
             model_index = models.index(selected_llm) if selected_llm in models else 0
             llm_model = param_cols[5].selectbox("LLM model", options=models, index=model_index)
+        default_priority = problem_type in {"auto", "concept", "short_answer"}
+        priority_answer_bank = st.checkbox(
+            "优先考试答案库",
+            value=default_priority,
+            help="对名词解释和简答题建议开启。优先使用：深度学习简答题_开卷检索版.md、近五年真题.md、《深度学习》附录名词术语详解.pdf。前提是这些文件已放入资料目录并完成索引。",
+        )
     elif kind == "ask":
         evidence_policy = param_cols[2].selectbox("Evidence", options=["warn", "strict", "open"], index=0)
         detail_label = param_cols[3].selectbox("Detail", options=["简洁", "标准", "详细"], index=1)
@@ -547,6 +572,11 @@ def render_controls() -> tuple[str, str, str, str, int, str, int, str, str, str,
         else:
             model_index = models.index(selected_llm) if selected_llm in models else 0
             llm_model = param_cols[4].selectbox("LLM model", options=models, index=model_index)
+        priority_answer_bank = st.checkbox(
+            "优先考试答案库",
+            value=False,
+            help="对名词解释和简答题建议开启。优先使用：深度学习简答题_开卷检索版.md、近五年真题.md、《深度学习》附录名词术语详解.pdf。前提是这些文件已放入资料目录并完成索引。",
+        )
     return (
         action,
         kind,
@@ -560,6 +590,7 @@ def render_controls() -> tuple[str, str, str, str, int, str, int, str, str, str,
         evidence_policy,
         detail,
         llm_model,
+        priority_answer_bank,
         submit_clicked,
         clear_clicked,
         refresh_clicked,
@@ -607,6 +638,7 @@ def submit_ask_queue_job(
     llm_model: str,
     evidence_policy: str,
     detail: str,
+    priority_answer_bank: bool,
 ) -> bool:
     if not question.strip():
         st.warning("请输入问题。")
@@ -624,6 +656,7 @@ def submit_ask_queue_job(
         llm_model=llm_model,
         evidence_policy=evidence_policy,
         detail=detail,
+        priority_answer_bank=priority_answer_bank,
     )
     job = submit_ask_job(
         get_ask_executor(),
@@ -638,6 +671,7 @@ def submit_ask_queue_job(
         llm_model=llm_model,
         evidence_policy=evidence_policy,
         detail=detail,
+        priority_answer_bank=priority_answer_bank,
     )
     session_jobs("ask_jobs").append(job)
     st.success("已提交 Ask 任务。")
@@ -655,6 +689,7 @@ def submit_solve_queue_job(
     llm_model: str,
     evidence_policy: str,
     detail: str,
+    priority_answer_bank: bool | None,
 ) -> bool:
     if not question.strip():
         st.warning("请输入一道考试题。")
@@ -674,6 +709,7 @@ def submit_solve_queue_job(
         llm_model=llm_model,
         evidence_policy=evidence_policy,
         detail=detail,
+        priority_answer_bank=priority_answer_bank,
     )
     job = submit_solve_job(
         get_solve_executor(),
@@ -689,6 +725,7 @@ def submit_solve_queue_job(
         llm_model=llm_model,
         evidence_policy=evidence_policy,
         detail=detail,
+        priority_answer_bank=priority_answer_bank,
     )
     session_jobs("solve_jobs").append(job)
     st.success("已提交 Solve 任务。")
@@ -713,6 +750,7 @@ def main() -> None:
         evidence_policy,
         detail,
         llm_model,
+        priority_answer_bank,
         submit_clicked,
         clear_clicked,
         refresh_clicked,
@@ -726,11 +764,11 @@ def main() -> None:
             mark_queue_input_for_clear(kind)
             rerun_app()
     elif submit_clicked and kind == "ask":
-        if submit_ask_queue_job(query, mode, scope, prefer, per_file_cap, top_k, llm_model, evidence_policy, detail):
+        if submit_ask_queue_job(query, mode, scope, prefer, per_file_cap, top_k, llm_model, evidence_policy, detail, bool(priority_answer_bank)):
             mark_queue_input_for_clear(kind)
             rerun_app()
     elif submit_clicked:
-        if submit_solve_queue_job(query, problem_type, mode, scope, prefer, per_file_cap, top_k, llm_model, evidence_policy, detail):
+        if submit_solve_queue_job(query, problem_type, mode, scope, prefer, per_file_cap, top_k, llm_model, evidence_policy, detail, priority_answer_bank):
             mark_queue_input_for_clear(kind)
             rerun_app()
     elif refresh_clicked:

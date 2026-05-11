@@ -16,6 +16,7 @@ def build_ask_signature(
     llm_model: str,
     evidence_policy: str,
     detail: str,
+    priority_answer_bank: bool = False,
 ) -> str:
     payload: dict[str, Any] = {
         "query": query,
@@ -28,6 +29,7 @@ def build_ask_signature(
         "llm_model": llm_model,
         "evidence_policy": evidence_policy,
         "detail": detail,
+        "priority_answer_bank": bool(priority_answer_bank),
     }
     return json.dumps(payload, ensure_ascii=False, sort_keys=True)
 
@@ -44,6 +46,7 @@ def build_solve_signature(
     llm_model: str,
     evidence_policy: str,
     detail: str,
+    priority_answer_bank: bool | None = None,
 ) -> str:
     payload: dict[str, Any] = {
         "query": query,
@@ -56,6 +59,7 @@ def build_solve_signature(
         "llm_model": llm_model,
         "evidence_policy": evidence_policy,
         "detail": detail,
+        "priority_answer_bank": priority_answer_bank,
     }
     return json.dumps(payload, ensure_ascii=False, sort_keys=True)
 

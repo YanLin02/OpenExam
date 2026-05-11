@@ -10,7 +10,7 @@ OpenExam `solve` currently routes these problem types:
 - `design`: structured design templates, then local Ask/LLM for prose.
 - `derivation`: structured derivation templates, then local Ask/LLM for prose.
 - `compare`: structured comparison templates, then local Ask/LLM for prose.
-- `concept` / `short_answer`: local Ask fallback with evidence policy.
+- `concept` / `short_answer`: local Ask fallback with evidence policy, with automatic exam answer bank priority retrieval.
 
 ## Supported Calculators
 
@@ -84,10 +84,21 @@ Design, derivation, and compare templates improve structure but still rely on lo
 - Derivation templates provide visible exam steps but do not perform symbolic algebra checking.
 - Compare templates enforce dimensions but cannot guarantee all course-specific emphasis is covered unless the local corpus contains it.
 
+## Exam Answer Bank Priority
+
+Concept and short-answer solve requests can prioritize these indexed files:
+
+- `深度学习简答题_开卷检索版.md`
+- `近五年真题.md`
+- `《深度学习》附录名词术语详解.pdf`
+
+The strategy is path/name based and does not require a database schema change. It only reorders retrieved chunks before prompt construction, preserving source citations and original scores. It requires the files to be present in the materials directory and ingested. It is not used to compute or override `calculation` numeric answers.
+
 ## Recommended Exam Usage
 
 - Use directly for parseable `calculation` questions. Numeric results come from deterministic calculators.
 - For complex `calculation`, rewrite the problem with explicit structured parameters or pass `--problem-type calculation`.
+- For `concept` and `short_answer`, use the default solve auto priority or pass `--priority-answer-bank`.
 - For `design`, `derivation`, and `compare`, use `solve` with `--evidence-policy warn` so weak local evidence remains visible.
 - Treat generated prose as an exam-answer draft and adjust it to the exact wording and marking rubric.
 

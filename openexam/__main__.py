@@ -12,6 +12,7 @@ from openexam.file_utils import file_uri, open_local_file, open_pdf_page_in_chro
 from openexam.ingest import ingest_directory
 from openexam.ollama_utils import ensure_ollama_running
 from openexam.problem_types import ProblemType, classify_problem
+from openexam.priority_sources import find_indexed_answer_bank_sources
 from openexam.search import search_index
 from openexam.solve import render_solve_response, solve_question
 
@@ -132,6 +133,7 @@ def cmd_ask(args: argparse.Namespace) -> int:
             evidence_policy=args.evidence_policy,
             detail=args.detail,
             auto_start_ollama=args.auto_start_ollama,
+            priority_answer_bank=args.priority_answer_bank,
         )
     except EmbeddingError as exc:
         print(f"Retrieval unavailable: {exc}", file=sys.stderr)
@@ -142,7 +144,8 @@ def cmd_ask(args: argparse.Namespace) -> int:
     print(
         f"检索配置：mode={response.search_mode}, scope={response.scope}, prefer={response.prefer}, "
         f"per_file_cap={response.per_file_cap}, top_k={response.top_k}, llm_model={response.llm_model}, "
-        f"evidence_policy={response.evidence_policy}, evidence_status={response.evidence_status}, detail={response.detail}\n"
+        f"evidence_policy={response.evidence_policy}, evidence_status={response.evidence_status}, "
+        f"detail={response.detail}, priority_answer_bank={response.priority_answer_bank}\n"
     )
     print(
         "timing: "
@@ -177,6 +180,7 @@ def cmd_solve(args: argparse.Namespace) -> int:
             evidence_policy=args.evidence_policy,
             detail=args.detail,
             auto_start_ollama=args.auto_start_ollama,
+            priority_answer_bank=args.priority_answer_bank,
         )
     except EmbeddingError as exc:
         print(f"Retrieval unavailable: {exc}", file=sys.stderr)
@@ -190,7 +194,8 @@ def cmd_solve(args: argparse.Namespace) -> int:
         f"scope={ask_response.scope}, prefer={ask_response.prefer}, per_file_cap={ask_response.per_file_cap}, "
         f"top_k={ask_response.top_k}, llm_model={ask_response.llm_model}, "
         f"evidence_policy={ask_response.evidence_policy}, evidence_status={ask_response.evidence_status}, "
-        f"detail={ask_response.detail}\n"
+        f"detail={ask_response.detail}, priority_answer_bank={ask_response.priority_answer_bank}, "
+        f"priority_answer_bank_arg={args.priority_answer_bank if args.priority_answer_bank is not None else 'auto'}\n"
     )
     print(
         "timing: "
@@ -250,6 +255,13 @@ def cmd_status(args: argparse.Namespace) -> int:
         print(f"Semantic model: {semantic.model}")
         print(f"Semantic chunks: {semantic.vector_count}")
         print(f"Semantic message: {semantic.message}")
+        answer_bank_sources = find_indexed_answer_bank_sources(DEFAULT_CONFIG)
+        print(f"Exam answer bank: indexed {len(answer_bank_sources)}/3")
+        if answer_bank_sources:
+            for source in answer_bank_sources:
+                print(f"- {source}")
+        else:
+            print("Exam answer bank message: 未检测到考试答案库文件。请将三份文件放入资料目录并重新建立索引。")
         failures = failed_documents(conn)
         if failures:
             print("\nRecent failures:")
@@ -364,6 +376,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     ask_parser.add_argument("--auto-start-ollama", dest="auto_start_ollama", action="store_true", default=True, help="Try to start `ollama serve` if Ollama is not reachable. Default: enabled.")
     ask_parser.add_argument("--no-auto-start-ollama", dest="auto_start_ollama", action="store_false", help="Do not try to start Ollama automatically.")
+    ask_parser.add_argument(
+        "--priority-answer-bank",
+        dest="priority_answer_bank",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Prioritize indexed exam answer bank sources during retrieval. Default: disabled for ask.",
+    )
     ask_parser.set_defaults(func=cmd_ask)
 
     solve_parser = subparsers.add_parser("solve", help="Solve an exam-style problem using classification plus local Ask fallback.")
@@ -423,6 +442,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     solve_parser.add_argument("--auto-start-ollama", dest="auto_start_ollama", action="store_true", default=True, help="Try to start `ollama serve` if Ollama is not reachable. Default: enabled.")
     solve_parser.add_argument("--no-auto-start-ollama", dest="auto_start_ollama", action="store_false", help="Do not try to start Ollama automatically.")
+    solve_parser.add_argument(
+        "--priority-answer-bank",
+        dest="priority_answer_bank",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Prioritize indexed exam answer bank sources. Default: auto for solve concept/short_answer.",
+    )
     solve_parser.set_defaults(func=cmd_solve)
 
     status_parser = subparsers.add_parser("status", help="Show index statistics and recent failures.")

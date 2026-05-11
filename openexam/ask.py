@@ -68,6 +68,7 @@ class AskResponse:
     missing_phrases: list[str]
     timing: dict[str, float]
     detail: AnswerDetail
+    priority_answer_bank: bool = False
 
 
 def format_location(result: SearchResult) -> str:
@@ -287,6 +288,7 @@ def ask_question(
     evidence_policy: EvidencePolicy = "warn",
     detail: AnswerDetail = "standard",
     auto_start_ollama: bool = True,
+    priority_answer_bank: bool = False,
 ) -> AskResponse:
     total_start = time.perf_counter()
     effective_top_k = top_k if top_k is not None else config.llm_context_top_k
@@ -304,6 +306,7 @@ def ask_question(
         prefer=prefer,
         per_file_cap=per_file_cap,
         timing=search_timing,
+        priority_answer_bank=priority_answer_bank,
     )
     retrieval_time_ms = (time.perf_counter() - retrieval_start) * 1000
     evidence_status, missing_phrases = evidence_status_for_question(question, results)
@@ -329,6 +332,7 @@ def ask_question(
                 "total_time_ms": (time.perf_counter() - total_start) * 1000,
             },
             detail=detail,
+            priority_answer_bank=priority_answer_bank,
         )
     prompt_start = time.perf_counter()
     prompt = build_ask_prompt(question, results, evidence_status=evidence_status, missing_phrases=missing_phrases, detail=detail)
@@ -360,4 +364,5 @@ def ask_question(
             "total_time_ms": (time.perf_counter() - total_start) * 1000,
         },
         detail=detail,
+        priority_answer_bank=priority_answer_bank,
     )

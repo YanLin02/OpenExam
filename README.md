@@ -183,6 +183,12 @@ Ask a local cited question using retrieved chunks:
 python -m openexam ask "summarize this concept" --mode hybrid --top-k 6 --evidence-policy warn
 ```
 
+For definition and short-answer study questions, `ask` can prioritize an indexed exam answer bank:
+
+```bash
+python -m openexam ask "简述 GAN 的训练过程" --priority-answer-bank
+```
+
 ### Solve
 
 Solve exam-style questions with a task-aware answer format:
@@ -200,6 +206,19 @@ Comparison questions use an "objects, common points, differences, pros/cons, sui
 In the Streamlit UI, choose `Solve exam problem` to submit one exam problem to its own queue. Search, Ask local AI, and Solve exam problem keep separate queues, so switching modes does not discard submitted work. Calculation questions that can be parsed use deterministic calculators and do not require the local LLM; design, derivation, compare, and open-ended solve answers still require a local chat model such as `qwen3:8b`.
 
 Calculation parsing includes common CNN shape forms such as `3x32x32`, explicit `NCHW=8x3x32x32`, explicit `NHWC=8x32x32x3`, and named dimensions like `batch=16, channels=3, height=224, width=224`. It also supports structured total parameter questions such as `Conv1 ...; Conv2 ...; FC ...` and `MLP 784-128-64-10`.
+
+The exam answer bank is a lightweight priority retrieval layer for `concept` and `short_answer` questions. Put these files in the indexed materials directory, then rerun ingest:
+
+- `深度学习简答题_开卷检索版.md`
+- `近五年真题.md`
+- `《深度学习》附录名词术语详解.pdf`
+
+```bash
+python -m openexam ingest /path/to/materials
+python -m openexam status
+```
+
+Use `--priority-answer-bank` or `--no-priority-answer-bank` to override the default. `ask` defaults to disabled. `solve` defaults to auto: enabled for `concept` and `short_answer`, disabled for calculation, design, derivation, and compare. In the Streamlit UI, enable `优先考试答案库` in Ask local AI or Solve exam problem. This priority layer only reorders retrieved local chunks; it does not change calculator results and does not invent sources.
 
 The output is a study and exam-answer draft. Adjust the level of detail and section emphasis to match the exact question wording.
 

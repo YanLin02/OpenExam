@@ -43,6 +43,7 @@ def fake_ask_response(question: str, *, llm_called: bool = True, **kwargs: Any) 
         missing_phrases=[],
         timing={"retrieval_time_ms": 0.0, "prompt_build_time_ms": 0.0, "llm_time_ms": 1.0, "total_time_ms": 1.0},
         detail=kwargs.get("detail", "standard"),
+        priority_answer_bank=kwargs.get("priority_answer_bank", False),
     )
 
 
@@ -145,3 +146,20 @@ def test_compare_exam_fixtures_use_template(monkeypatch: pytest.MonkeyPatch, tmp
 )
 def test_concept_and_short_answer_exam_fixtures_only_classify(case: dict[str, Any]) -> None:
     assert classify_problem(case["question"]) == ProblemType(case["expected_problem_type"])
+
+
+@pytest.mark.parametrize(
+    "case",
+    [case for case in EXAM_QUESTIONS if case.get("expected_priority_answer_bank") is True],
+    ids=exam_question_id,
+)
+def test_concept_and_short_answer_fixtures_enable_priority_answer_bank(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    case: dict[str, Any],
+) -> None:
+    monkeypatch.setattr("openexam.solve.ask_question", fake_ask_response)
+    response = solve_question(case["question"], config=AppConfig(index_dir=tmp_path / ".openexam"))
+
+    assert response.problem_type in {ProblemType.CONCEPT, ProblemType.SHORT_ANSWER}
+    assert response.ask_response.priority_answer_bank is True
