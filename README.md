@@ -373,12 +373,15 @@ The UI provides:
 - Compact retrieval controls for mode, scope, top-k, source preference, and per-file caps.
 - Ask controls for evidence policy, detail level, and LLM model.
 - Sidebar controls for indexing, index status, semantic status, Ollama status, and parameter help.
+- A `选择文件夹` button next to the materials path field on macOS. It opens the native folder picker and writes the selected path into the fallback text input.
 - PDF page preview inside the app for results with page numbers.
 - Local file open and Finder reveal actions.
 - Queued Search and Ask result cards so file actions do not rerun retrieval or local LLM generation.
 - Timing information for retrieval and local generation.
 
 Browser `file://` links are not used as the primary open mechanism because browsers may block local-file navigation from a localhost page. PDF page preview inside Streamlit is the most reliable way to inspect the referenced page.
+
+The browser cannot directly provide arbitrary local folder paths for security reasons, so `选择文件夹` is implemented by the local Streamlit backend with macOS `osascript`. If the picker is unavailable, cancelled, or running on another platform, enter the path manually in the text input.
 
 The Ollama sidebar `Start` button attempts to run local `ollama serve` and records the process id under `.openexam/ollama.pid`. The `Stop` button only stops an Ollama server that OpenExam started. If Ollama was started manually or by Homebrew services, stop it manually or run `brew services stop ollama`.
 

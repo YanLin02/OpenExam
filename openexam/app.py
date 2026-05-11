@@ -19,6 +19,7 @@ from openexam.config import DEFAULT_CONFIG
 from openexam.db import connect, failed_documents, index_stats
 from openexam.embeddings import embed_if_needed, embedding_status
 from openexam.file_utils import open_local_file, reveal_local_file
+from openexam.folder_picker import pick_folder
 from openexam.ingest import ingest_directory
 from openexam.jobs import (
     JobRecord,
@@ -166,7 +167,23 @@ def render_ollama_status() -> None:
 def render_sidebar() -> None:
     with st.sidebar:
         st.header("管理")
-        data_dir = st.text_input("资料目录", value="", key="data_dir")
+        if "data_dir_input" not in st.session_state:
+            st.session_state["data_dir_input"] = ""
+        pending_data_dir = st.session_state.pop("pending_data_dir_input", None)
+        if pending_data_dir:
+            st.session_state["data_dir_input"] = pending_data_dir
+
+        dir_col, pick_col = st.columns([5, 1])
+        data_dir = dir_col.text_input("资料目录", key="data_dir_input")
+        if pick_col.button("选择文件夹", use_container_width=True):
+            result = pick_folder()
+            if result.selected_path:
+                st.session_state["pending_data_dir_input"] = result.selected_path
+                st.rerun()
+            elif result.cancelled:
+                st.info("已取消选择文件夹。")
+            else:
+                st.warning(f"无法打开文件夹选择器：{result.error}")
         auto_embed_after_ingest = st.checkbox(
             "索引后自动更新语义索引",
             value=True,
@@ -183,6 +200,8 @@ def render_sidebar() -> None:
                 root = Path(data_dir).expanduser()
                 if not root.exists():
                     st.error(f"路径不存在：{root}")
+                elif not root.is_dir():
+                    st.error(f"请选择资料文件夹，而不是文件：{root}")
                 else:
                     with st.spinner("Indexing local files..."):
                         stats = ingest_directory(root, config=DEFAULT_CONFIG, rebuild=rebuild_clicked)
