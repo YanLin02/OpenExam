@@ -4,7 +4,17 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-from openexam.calculators.cnn import conv2d_output_size, conv2d_param_count, linear_param_count, pool2d_output_size
+from openexam.calculators.cnn import (
+    LayerParamSpec,
+    conv2d_output_shape,
+    conv2d_output_size,
+    conv2d_param_count,
+    linear_param_count,
+    make_conv2d_layer_param_spec,
+    make_linear_layer_param_spec,
+    multi_layer_param_count,
+    pool2d_output_size,
+)
 from openexam.calculators.losses import cross_entropy_from_logits, mse, softmax
 from openexam.calculators.metrics import classification_metrics
 from openexam.calculators.optimization import gradient_descent_step
@@ -34,6 +44,7 @@ class CalculationAnswer:
 NEED_MANUAL_INPUT = "need_manual_input"
 _NUMBER = r"[-+]?\d+(?:\.\d+)?"
 _PAIR = re.compile(r"(\d+)\s*[x×*]\s*(\d+)", re.IGNORECASE)
+_SHAPE_SEP = r"\s*[x×*]\s*"
 
 
 def _normalize(text: str) -> str:
@@ -57,6 +68,15 @@ def _int_pair_after(label_pattern: str, text: str) -> tuple[int, int] | None:
     return int(match.group(1)), int(match.group(2))
 
 
+def _int_tuple_after(label_pattern: str, text: str, dims: int) -> tuple[int, ...] | None:
+    number_parts = [f"({_NUMBER})" for _ in range(dims)]
+    pattern = label_pattern + r"[^\d]{0,24}" + _SHAPE_SEP.join(number_parts)
+    match = re.search(pattern, text, flags=re.IGNORECASE)
+    if not match:
+        return None
+    return tuple(int(float(match.group(index))) for index in range(1, dims + 1))
+
+
 def _all_pairs(text: str) -> list[tuple[int, int]]:
     return [(int(left), int(right)) for left, right in _PAIR.findall(text)]
 
@@ -78,6 +98,10 @@ def detect_calculation_type(question: str) -> str:
     text = _normalize(question).lower()
     if not text:
         return NEED_MANUAL_INPUT
+    if ("mlp" in text and "参数" in text) or (
+        "总参数" in text and (("conv1" in text and ("conv2" in text or "fc" in text)) or "全连接" in text)
+    ):
+        return "multi_layer_param_count"
     if all(token.lower() in text for token in ("tp", "fp", "tn", "fn")):
         return "classification_metrics"
     if all(token in text for token in ("w", "grad", "lr")) or "梯度下降" in text:
@@ -91,6 +115,8 @@ def detect_calculation_type(question: str) -> str:
         return "linear_param_count"
     if ("卷积" in text or "conv" in text) and "参数" in text and ("通道" in text or "channel" in text):
         return "conv2d_param_count"
+    if ("卷积" in text or "conv" in text) and ("shape" in text or "输出通道" in text or "out_channels" in text):
+        return "conv2d_output_shape"
     if ("池化" in text or "pool" in text) and ("输出尺寸" in text or "尺寸" in text):
         return "pool2d_output_size"
     if ("卷积" in text or "conv" in text) and ("输出尺寸" in text or "尺寸" in text):
@@ -139,9 +165,93 @@ def _parse_conv_or_pool_output(question: str, calculation_type: str) -> Calculat
     )
 
 
+def _channel_int(label_pattern: str, question: str) -> int | None:
+    return _first_int(label_pattern + r"\s*(?:=|为)?\s*(\d+)", question)
+
+
+def _kernel_pair(question: str) -> tuple[int, int] | None:
+    kernel_pair = _int_pair_after(r"(?:卷积核|kernel|conv|卷积)", question)
+    if kernel_pair is not None:
+        return kernel_pair
+    match = re.search(_PAIR.pattern + r"\s*(?:卷积|conv)", question, flags=re.IGNORECASE)
+    if not match:
+        return None
+    return int(match.group(1)), int(match.group(2))
+
+
+def _parse_labeled_conv_shape(question: str) -> tuple[str, tuple[int, ...]] | None:
+    explicit_layouts = (
+        ("NCHW", r"(?:NCHW|shape\s*(?:为)?\s*NCHW)\s*=?\s*"),
+        ("NHWC", r"(?:NHWC|shape\s*(?:为)?\s*NHWC)\s*=?\s*"),
+    )
+    for layout, label in explicit_layouts:
+        shape = _int_tuple_after(label, question, dims=4)
+        if shape is not None:
+            return layout, shape
+    chw = _int_tuple_after(r"(?:CxHxW|C\s*x\s*H\s*x\s*W)\s*=?", question, dims=3)
+    if chw is not None:
+        return "CHW", chw
+    return None
+
+
+def _parse_conv_shape_from_named_dimensions(question: str) -> tuple[str, tuple[int, ...]] | None:
+    batch = _channel_int(r"(?:batch|批大小)", question)
+    channels = _channel_int(r"(?:channels?|通道数|输入通道)", question)
+    height = _channel_int(r"(?:height|高度)", question)
+    width = _channel_int(r"(?:width|宽度)", question)
+    if batch is not None and channels is not None and height is not None and width is not None:
+        return "NCHW", (batch, channels, height, width)
+    return None
+
+
+def _parse_conv_shape(question: str) -> CalculationParseResult:
+    out_channels = _channel_int(r"(?:输出通道|out_channels?|输出\s*channel)", question)
+    kernel_pair = _kernel_pair(question)
+    if out_channels is None or kernel_pair is None:
+        return CalculationParseResult("conv2d_output_shape", need_manual_input=True, reason="missing out_channels or kernel size")
+
+    parsed_shape = _parse_labeled_conv_shape(question) or _parse_conv_shape_from_named_dimensions(question)
+    if parsed_shape is None:
+        candidate_shape = _int_tuple_after(r"(?:输入(?:尺寸|shape)?|input(?:\s*shape)?)\s*(?:为)?", question, dims=4)
+        if candidate_shape is not None:
+            return CalculationParseResult(
+                "conv2d_output_shape",
+                need_manual_input=True,
+                reason="4D input shape requires explicit NCHW or NHWC layout",
+            )
+        candidate_shape_3d = _int_tuple_after(r"(?:输入(?:尺寸|shape)?|input(?:\s*shape)?)\s*(?:为)?", question, dims=3)
+        if candidate_shape_3d is None:
+            return CalculationParseResult("conv2d_output_shape", need_manual_input=True, reason="missing input shape")
+        parsed_shape = ("CHW", candidate_shape_3d)
+
+    layout, input_shape = parsed_shape
+    if "无填充" in question:
+        padding_h, padding_w = 0, 0
+    else:
+        padding_h, padding_w = _optional_pair_value(r"(?:padding|填充)", question, default=0)
+    stride_h, stride_w = _optional_pair_value(r"(?:stride|步长)", question, default=1)
+    dilation_h, dilation_w = _optional_pair_value(r"(?:dilation|膨胀)", question, default=1)
+    return CalculationParseResult(
+        "conv2d_output_shape",
+        parameters={
+            "input_shape": input_shape,
+            "layout": layout,
+            "out_channels": out_channels,
+            "kernel_h": kernel_pair[0],
+            "kernel_w": kernel_pair[1],
+            "stride_h": stride_h,
+            "stride_w": stride_w,
+            "padding_h": padding_h,
+            "padding_w": padding_w,
+            "dilation_h": dilation_h,
+            "dilation_w": dilation_w,
+        },
+    )
+
+
 def _parse_conv_params(question: str) -> CalculationParseResult:
-    in_channels = _first_int(r"(?:输入通道|in_channels?|输入 channel)\s*=?\s*(\d+)", question)
-    out_channels = _first_int(r"(?:输出通道|out_channels?|输出 channel)\s*=?\s*(\d+)", question)
+    in_channels = _channel_int(r"(?:输入通道|in_channels?|输入\s*channel)", question)
+    out_channels = _channel_int(r"(?:输出通道|out_channels?|输出\s*channel)", question)
     kernel_pair = _int_pair_after(r"(?:卷积核|kernel)", question)
     if in_channels is None or out_channels is None or kernel_pair is None:
         return CalculationParseResult("conv2d_param_count", need_manual_input=True, reason="missing channel or kernel size")
@@ -241,9 +351,84 @@ def _parse_attention_params(question: str, calculation_type: str) -> Calculation
     )
 
 
+def _parse_mlp_params(question: str) -> CalculationParseResult | None:
+    match = re.search(r"mlp\s*结构\s*(?:为|=)?\s*((?:\d+\s*-\s*)+\d+)", question, flags=re.IGNORECASE)
+    if not match:
+        return None
+    sizes = [int(part) for part in re.findall(r"\d+", match.group(1))]
+    if len(sizes) < 2:
+        return CalculationParseResult("multi_layer_param_count", need_manual_input=True, reason="MLP requires at least two layer sizes")
+    layers = [
+        {"name": f"FC{index}", "layer_type": "linear", "in_features": sizes[index - 1], "out_features": sizes[index]}
+        for index in range(1, len(sizes))
+    ]
+    return CalculationParseResult("multi_layer_param_count", {"layers": layers})
+
+
+def _parse_conv_fc_segment(segment: str) -> dict[str, object] | None:
+    name_match = re.search(r"\b(conv\d+|fc\d*)\b", segment, flags=re.IGNORECASE)
+    if not name_match:
+        return None
+    raw_name = name_match.group(1)
+    name = raw_name[:1].upper() + raw_name[1:]
+    if raw_name.lower().startswith("conv"):
+        in_channels = _channel_int(r"(?:输入通道|in_channels?|输入\s*channel)", segment)
+        out_channels = _channel_int(r"(?:输出通道|out_channels?|输出\s*channel)", segment)
+        kernel_pair = _kernel_pair(segment)
+        if in_channels is None or out_channels is None or kernel_pair is None:
+            return None
+        return {
+            "name": name,
+            "layer_type": "conv2d",
+            "in_channels": in_channels,
+            "out_channels": out_channels,
+            "kernel_h": kernel_pair[0],
+            "kernel_w": kernel_pair[1],
+        }
+    in_features = _first_int(r"(?:输入|in_features?)\s*(?:=|为)?\s*(\d+)", segment)
+    out_features = _first_int(r"(?:输出|out_features?)\s*(?:=|为)?\s*(\d+)", segment)
+    if in_features is None or out_features is None:
+        return None
+    return {"name": name or "FC", "layer_type": "linear", "in_features": in_features, "out_features": out_features}
+
+
+def _parse_multi_layer_params(question: str) -> CalculationParseResult:
+    mlp = _parse_mlp_params(question)
+    if mlp is not None:
+        return mlp
+    layers = []
+    for segment in re.split(r"[;；]", question):
+        parsed = _parse_conv_fc_segment(segment)
+        if parsed is not None:
+            layers.append(parsed)
+    if not layers:
+        return CalculationParseResult("multi_layer_param_count", need_manual_input=True, reason="missing structured layer specs")
+    return CalculationParseResult("multi_layer_param_count", {"layers": layers})
+
+
+def _layer_spec_from_params(params: dict[str, object]) -> LayerParamSpec:
+    if params["layer_type"] == "conv2d":
+        return make_conv2d_layer_param_spec(
+            name=str(params["name"]),
+            in_channels=int(params["in_channels"]),
+            out_channels=int(params["out_channels"]),
+            kernel_h=int(params["kernel_h"]),
+            kernel_w=int(params["kernel_w"]),
+        )
+    return make_linear_layer_param_spec(
+        name=str(params["name"]),
+        in_features=int(params["in_features"]),
+        out_features=int(params["out_features"]),
+    )
+
+
 def parse_calculation_question(question: str) -> CalculationParseResult:
     normalized = _normalize(question)
     calculation_type = detect_calculation_type(normalized)
+    if calculation_type == "multi_layer_param_count":
+        return _parse_multi_layer_params(normalized)
+    if calculation_type == "conv2d_output_shape":
+        return _parse_conv_shape(normalized)
     if calculation_type == "conv2d_output_size":
         return _parse_conv_or_pool_output(normalized, calculation_type)
     if calculation_type == "pool2d_output_size":
@@ -293,6 +478,8 @@ def solve_calculation_question(question: str) -> CalculationAnswer:
     params = parsed.parameters
     if parsed.calculation_type == "conv2d_output_size":
         return _answer_from_dict(parsed.calculation_type, conv2d_output_size(**params))
+    if parsed.calculation_type == "conv2d_output_shape":
+        return _answer_from_dict(parsed.calculation_type, conv2d_output_shape(**params))
     if parsed.calculation_type == "pool2d_output_size":
         return _answer_from_dict(parsed.calculation_type, pool2d_output_size(**params))
     if parsed.calculation_type == "conv2d_param_count":
@@ -365,6 +552,21 @@ def solve_calculation_question(question: str) -> CalculationAnswer:
         return _answer_from_dict(parsed.calculation_type, attention_qkv_param_count(**params))
     if parsed.calculation_type == "multihead_attention_param_count":
         return _answer_from_dict(parsed.calculation_type, multihead_attention_param_count(**params))
+    if parsed.calculation_type == "multi_layer_param_count":
+        layer_specs = [_layer_spec_from_params(layer_params) for layer_params in params["layers"]]
+        answer = multi_layer_param_count(layer_specs)
+        formula = "\n".join(f"{layer.name}: {layer.formula}" for layer in answer.layers)
+        substitution = "\n".join(layer.substitution for layer in answer.layers)
+        return CalculationAnswer(
+            calculation_type=parsed.calculation_type,
+            formula=f"{formula}\ntotal_params = sum(layer_params)",
+            substitution=f"{substitution}\ntotal_params = {answer.total_params}",
+            result_text=answer.result_text,
+            values={
+                "layers": [layer.__dict__ for layer in answer.layers],
+                "total_params": answer.total_params,
+            },
+        )
     return CalculationAnswer(
         calculation_type=parsed.calculation_type,
         formula="",

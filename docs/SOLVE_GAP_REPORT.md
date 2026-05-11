@@ -17,8 +17,10 @@ OpenExam `solve` currently routes these problem types:
 Current deterministic calculator coverage:
 
 - CNN and pooling output size.
+- CNN output shape for explicit `CHW`, `NCHW`, and `NHWC` layouts.
 - Conv2D parameter count.
 - Linear layer parameter count.
+- Structured multi-layer Conv/FC and MLP total parameter counts.
 - Softmax and cross entropy from logits.
 - MSE.
 - Accuracy, precision, recall, and F1 from TP/FP/TN/FN.
@@ -33,9 +35,14 @@ Current deterministic calculator coverage:
 The parser intentionally covers common structured exam formats, not arbitrary prose. Stable examples include:
 
 - `输入 32x32，卷积核 5x5，stride=1，padding=0`.
+- `输入尺寸为 3x32x32，卷积核 3x3，输出通道 64`.
+- `NCHW=8x3x32x32` and `NHWC=8x32x32x3`.
+- `batch=16, channels=3, height=224, width=224`.
 - `输入为 28×28，卷积核 5×5，步长 1，无填充`.
 - `卷积层输入通道 3，输出通道 64，卷积核 3x3`.
 - `全连接层输入 784，输出 10`.
+- `Conv1: ...; Conv2: ...; FC: ... 求总参数量`.
+- `MLP 结构为 784-128-64-10`.
 - `logits=[2,1,0]，真实类别为 0`.
 - `y_true=[...], y_pred=[...]`.
 - `TP=80, FP=10, TN=90, FN=20`.
@@ -47,8 +54,7 @@ The parser intentionally covers common structured exam formats, not arbitrary pr
 
 These formats are not yet reliably parsed:
 
-- Multi-layer network parameter totals described only in prose.
-- CNN output shapes with batch/channel layout inference such as `NCHW` or `NHWC`.
+- Multi-layer network parameter totals described only in loose prose.
 - Non-square tensors written without clear labels.
 - Optimizer updates beyond basic scalar gradient descent.
 - Confusion matrices written as a 2x2 matrix without TP/FP/TN/FN labels.
@@ -62,8 +68,8 @@ When parsing is unreliable, `solve` should return a manual-input fallback instea
 
 Recommended next additions:
 
-- CNN shape parser for `C x H x W`, `N x C x H x W`, and channel-preserving output text.
-- Multi-layer CNN/MLP parameter count aggregation.
+- Conv + pool shape tracing across multiple spatial layers.
+- Multi-layer CNN/MLP parameter count parsing from less structured prose.
 - Confusion-matrix parser for 2x2 table formats.
 - Macro/micro/weighted classification metrics.
 - Adam and momentum SGD one-step update calculators.

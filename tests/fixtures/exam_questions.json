@@ -110,6 +110,76 @@
     "notes": "Transformer QKV params."
   },
   {
+    "id": "calc_chw_conv_shape",
+    "question": "输入尺寸为 3x32x32，卷积核 3x3，输出通道 64，stride=1，padding=1，输出尺寸是多少？",
+    "expected_problem_type": "calculation",
+    "expected_subtype": "conv2d_output_shape",
+    "expected_contains": ["输出 shape 为 64 x 32 x 32", "conv2d_output_shape"],
+    "expected_not_contains": ["未能可靠解析"],
+    "expected_llm_called": false,
+    "notes": "CHW conv output shape."
+  },
+  {
+    "id": "calc_nchw_conv_shape",
+    "question": "输入 shape 为 NCHW=8x3x32x32，卷积核 3x3，输出通道 64，stride=1，padding=1，输出 shape 是多少？",
+    "expected_problem_type": "calculation",
+    "expected_subtype": "conv2d_output_shape",
+    "expected_contains": ["输出 shape 为 8 x 64 x 32 x 32", "NCHW"],
+    "expected_not_contains": ["未能可靠解析"],
+    "expected_llm_called": false,
+    "notes": "NCHW conv output shape."
+  },
+  {
+    "id": "calc_nhwc_conv_shape",
+    "question": "输入 shape 为 NHWC=8x32x32x3，卷积核 3x3，输出通道 64，stride=1，padding=1，输出 shape 是多少？",
+    "expected_problem_type": "calculation",
+    "expected_subtype": "conv2d_output_shape",
+    "expected_contains": ["输出 shape 为 8 x 32 x 32 x 64", "NHWC"],
+    "expected_not_contains": ["未能可靠解析"],
+    "expected_llm_called": false,
+    "notes": "NHWC conv output shape."
+  },
+  {
+    "id": "calc_named_dims_conv_shape",
+    "question": "输入为 batch=16, channels=3, height=224, width=224，conv 7x7, stride=2, padding=3, out_channels=64，输出 shape？",
+    "expected_problem_type": "calculation",
+    "expected_subtype": "conv2d_output_shape",
+    "expected_contains": ["输出 shape 为 16 x 64 x 112 x 112", "conv2d_output_shape"],
+    "expected_not_contains": ["未能可靠解析"],
+    "expected_llm_called": false,
+    "notes": "Named NCHW dimensions conv output shape."
+  },
+  {
+    "id": "calc_multi_layer_conv_fc_params",
+    "question": "网络包含 Conv1: 输入通道 3，输出通道 16，卷积核 3x3；Conv2: 输入通道 16，输出通道 32，卷积核 3x3；FC: 输入 800，输出 10，求总参数量",
+    "expected_problem_type": "calculation",
+    "expected_subtype": "multi_layer_param_count",
+    "expected_contains": ["总参数量为 13098", "Conv1", "Conv2", "FC"],
+    "expected_not_contains": ["未能可靠解析"],
+    "expected_llm_called": false,
+    "notes": "Structured Conv1+Conv2+FC total params."
+  },
+  {
+    "id": "calc_mlp_params",
+    "question": "MLP 结构为 784-128-64-10，求全连接参数量",
+    "expected_problem_type": "calculation",
+    "expected_subtype": "multi_layer_param_count",
+    "expected_contains": ["总参数量为 109386", "FC1", "FC2", "FC3"],
+    "expected_not_contains": ["未能可靠解析"],
+    "expected_llm_called": false,
+    "notes": "Structured MLP total fully connected params."
+  },
+  {
+    "id": "calc_ambiguous_4d_shape_gap",
+    "question": "输入 shape 为 8x32x32x3，卷积核 3x3，输出通道 64，stride=1，padding=1，输出 shape 是多少？",
+    "expected_problem_type": "calculation",
+    "expected_subtype": "conv2d_output_shape",
+    "expected_contains": ["未能可靠解析题目参数", "layout"],
+    "expected_not_contains": ["输出 shape 为"],
+    "expected_llm_called": true,
+    "notes": "Ambiguous 4D shape must not be guessed; fake Ask fallback is expected in regression tests."
+  },
+  {
     "id": "design_cnn_digits",
     "question": "设计一个 CNN 完成手写数字识别任务",
     "expected_problem_type": "design",

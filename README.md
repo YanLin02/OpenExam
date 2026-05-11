@@ -199,6 +199,8 @@ Comparison questions use an "objects, common points, differences, pros/cons, sui
 
 In the Streamlit UI, choose `Solve exam problem` to submit one exam problem to its own queue. Search, Ask local AI, and Solve exam problem keep separate queues, so switching modes does not discard submitted work. Calculation questions that can be parsed use deterministic calculators and do not require the local LLM; design, derivation, compare, and open-ended solve answers still require a local chat model such as `qwen3:8b`.
 
+Calculation parsing includes common CNN shape forms such as `3x32x32`, explicit `NCHW=8x3x32x32`, explicit `NHWC=8x32x32x3`, and named dimensions like `batch=16, channels=3, height=224, width=224`. It also supports structured total parameter questions such as `Conv1 ...; Conv2 ...; FC ...` and `MLP 784-128-64-10`.
+
 The output is a study and exam-answer draft. Adjust the level of detail and section emphasis to match the exact question wording.
 
 Solve has a small exam regression suite in `tests/fixtures/exam_questions.json`, covering calculation, design, derivation, compare, concept, and short-answer style prompts. Run it with:

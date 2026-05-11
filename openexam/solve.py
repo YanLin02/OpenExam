@@ -150,7 +150,7 @@ def solve_question(
             ask_response=ask_response,
             requested_mode=mode.value if isinstance(mode, ProblemType) else mode,
             calculation_answer=calculation_answer,
-            fallback_note="未能可靠解析题目参数，以下为基于本地资料和模型的解题说明。",
+            fallback_note=f"未能可靠解析题目参数（{calculation_answer.reason}），以下为基于本地资料和模型的解题说明。",
         )
 
     if problem_type == ProblemType.DESIGN:

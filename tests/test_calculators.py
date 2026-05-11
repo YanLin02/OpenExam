@@ -7,13 +7,17 @@ import pytest
 from openexam.calculators import (
     attention_qkv_param_count,
     classification_metrics,
+    conv2d_output_shape,
     conv2d_output_size,
     conv2d_param_count,
     cross_entropy_from_logits,
     gradient_descent_step,
     linear_param_count,
     lstm_param_count,
+    make_conv2d_layer_param_spec,
+    make_linear_layer_param_spec,
     mse,
+    multi_layer_param_count,
     multihead_attention_param_count,
     pool2d_output_size,
     simple_rnn_param_count,
@@ -39,6 +43,16 @@ def test_pool2d_output_size() -> None:
     assert "池化" in str(result["result_text"])
 
 
+def test_conv2d_output_shape_layouts() -> None:
+    chw = conv2d_output_shape((3, 32, 32), "CHW", 64, 3, 3, padding_h=1, padding_w=1)
+    nchw = conv2d_output_shape((8, 3, 32, 32), "NCHW", 64, 3, 3, padding_h=1, padding_w=1)
+    nhwc = conv2d_output_shape((8, 32, 32, 3), "NHWC", 64, 3, 3, padding_h=1, padding_w=1)
+
+    assert chw["output_shape"] == (64, 32, 32)
+    assert nchw["output_shape"] == (8, 64, 32, 32)
+    assert nhwc["output_shape"] == (8, 32, 32, 64)
+
+
 def test_conv2d_param_count() -> None:
     result = conv2d_param_count(in_channels=3, out_channels=64, kernel_h=3, kernel_w=3, bias=True)
 
@@ -51,6 +65,31 @@ def test_linear_param_count() -> None:
     result = linear_param_count(in_features=784, out_features=10, bias=True)
 
     assert result["params"] == 7850
+
+
+def test_multi_layer_param_count_conv_and_fc() -> None:
+    answer = multi_layer_param_count(
+        [
+            make_conv2d_layer_param_spec("Conv1", 3, 16, 3, 3),
+            make_conv2d_layer_param_spec("Conv2", 16, 32, 3, 3),
+            make_linear_layer_param_spec("FC", 800, 10),
+        ]
+    )
+
+    assert [layer.params for layer in answer.layers] == [448, 4640, 8010]
+    assert answer.total_params == 13098
+
+
+def test_multi_layer_param_count_mlp() -> None:
+    answer = multi_layer_param_count(
+        [
+            make_linear_layer_param_spec("FC1", 784, 128),
+            make_linear_layer_param_spec("FC2", 128, 64),
+            make_linear_layer_param_spec("FC3", 64, 10),
+        ]
+    )
+
+    assert answer.total_params == 109386
 
 
 def test_softmax_probability_sum() -> None:

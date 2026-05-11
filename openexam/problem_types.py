@@ -16,6 +16,7 @@ class ProblemType(str, Enum):
 _KEYWORDS: dict[ProblemType, tuple[tuple[str, int], ...]] = {
     ProblemType.CALCULATION: (
         ("输出尺寸", 3),
+        ("输出 shape", 3),
         ("参数量", 3),
         ("交叉熵", 2),
         ("softmax", 2),
@@ -25,6 +26,7 @@ _KEYWORDS: dict[ProblemType, tuple[tuple[str, int], ...]] = {
         ("recall", 2),
         ("f1", 2),
         ("维度", 2),
+        ("shape", 2),
         ("多少", 2),
         ("计算", 2),
         ("求", 1),

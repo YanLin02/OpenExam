@@ -60,15 +60,21 @@ def test_calculation_exam_fixtures_use_calculators(monkeypatch: pytest.MonkeyPat
     def fail_if_llm_is_called(*args: Any, **kwargs: Any) -> AskResponse:
         raise AssertionError("calculation fixture unexpectedly called ask_question")
 
-    monkeypatch.setattr("openexam.solve.ask_question", fail_if_llm_is_called)
+    if case["expected_llm_called"] is False:
+        monkeypatch.setattr("openexam.solve.ask_question", fail_if_llm_is_called)
+    else:
+        monkeypatch.setattr("openexam.solve.ask_question", fake_ask_response)
     response = solve_question(case["question"], config=AppConfig(index_dir=tmp_path / ".openexam"))
     rendered = render_solve_response(response)
 
     assert response.problem_type == ProblemType.CALCULATION
     assert response.calculation_answer is not None
-    assert not response.calculation_answer.need_manual_input
     assert response.calculation_answer.calculation_type == case["expected_subtype"]
     assert response.ask_response.llm_called is case["expected_llm_called"]
+    if case["expected_llm_called"] is False:
+        assert not response.calculation_answer.need_manual_input
+    else:
+        assert response.calculation_answer.need_manual_input
     for expected in case["expected_contains"]:
         assert expected in rendered
     for unexpected in case["expected_not_contains"]:
