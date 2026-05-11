@@ -62,7 +62,60 @@ python -m openexam search "your query" --mode hybrid --top-k 5
 Start the local UI:
 
 ```bash
-streamlit run openexam/app.py --server.address 127.0.0.1
+python3 -m openexam ui
+```
+
+## 启动方式
+
+第一次使用前仍需要安装依赖：
+
+```bash
+python3 -m pip install -e ".[dev]"
+```
+
+### 命令行启动
+
+```bash
+python3 -m openexam ui
+```
+
+### 安装后启动
+
+```bash
+openexam-ui
+```
+
+You can also use the package CLI:
+
+```bash
+openexam ui
+```
+
+### macOS 双击启动
+
+```bash
+chmod +x scripts/run_openexam.command
+```
+
+Then double-click:
+
+```text
+scripts/run_openexam.command
+```
+
+The UI binds to `127.0.0.1` by default and is available at:
+
+```text
+http://127.0.0.1:8501
+```
+
+Closing the terminal window or pressing `Ctrl+C` stops the service.
+
+Ollama models are still prepared manually before semantic search or local cited Q&A:
+
+```bash
+ollama pull bge-m3
+ollama pull qwen3:8b
 ```
 
 ## CLI Usage
@@ -202,7 +255,7 @@ Outputs include the answer, evidence snippets, and source list with file name, l
 Start the UI locally:
 
 ```bash
-streamlit run openexam/app.py --server.address 127.0.0.1
+python3 -m openexam ui
 ```
 
 The UI provides:

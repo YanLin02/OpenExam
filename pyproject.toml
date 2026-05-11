@@ -18,6 +18,10 @@ dependencies = [
   "numpy>=1.23",
 ]
 
+[project.scripts]
+openexam = "openexam.__main__:main"
+openexam-ui = "openexam.launcher:main"
+
 [project.optional-dependencies]
 dev = [
   "pytest>=8.0",

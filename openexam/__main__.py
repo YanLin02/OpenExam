@@ -210,6 +210,12 @@ def cmd_status(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_ui(args: argparse.Namespace) -> int:
+    from openexam.launcher import launch_streamlit
+
+    return launch_streamlit(address=args.address, port=args.port, headless=args.headless)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="python -m openexam", description="Offline local document search.")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -312,6 +318,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     status_parser = subparsers.add_parser("status", help="Show index statistics and recent failures.")
     status_parser.set_defaults(func=cmd_status)
+
+    ui_parser = subparsers.add_parser("ui", help="Start the local Streamlit UI.")
+    ui_parser.add_argument("--address", default="127.0.0.1", help="Address for the Streamlit server. Default: 127.0.0.1.")
+    ui_parser.add_argument("--port", type=int, default=8501, help="Port for the Streamlit server. Default: 8501.")
+    ui_parser.add_argument("--headless", action="store_true", help="Run Streamlit in headless mode.")
+    ui_parser.set_defaults(func=cmd_ui)
     return parser
 
 
