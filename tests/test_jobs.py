@@ -10,6 +10,7 @@ from openexam.jobs import (
     close_job_by_id,
     create_ask_executor,
     create_search_executor,
+    create_solve_executor,
     is_job_collapsed,
     job_elapsed_seconds,
     job_preview_prefix,
@@ -19,6 +20,7 @@ from openexam.jobs import (
     remove_job_by_id,
     submit_ask_job,
     submit_search_job,
+    submit_solve_job,
     toggle_job_collapsed,
     update_job_from_future,
 )
@@ -44,6 +46,14 @@ def test_job_record_initial_status() -> None:
     assert job.result is None
     assert job.error is None
     assert isinstance(job_elapsed_seconds(job), float)
+
+
+def test_job_kind_supports_solve() -> None:
+    job = JobRecord(job_id=make_job_id(), kind="solve", input_text="设计一个 CNN", signature="sig")
+
+    assert job.kind == "solve"
+    assert job_preview_prefix("solve", "abc123") == "solve-job-abc123"
+    assert queue_input_key("solve") == "solve_queue_input"
 
 
 def test_submit_search_job_with_fake_search() -> None:
@@ -138,6 +148,63 @@ def test_submit_ask_job_can_use_solve_mode() -> None:
     assert job.error is None
 
 
+def test_submit_solve_job_with_fake_solve() -> None:
+    def fake_solve(question, *, mode, search_mode, scope, prefer, per_file_cap, top_k, llm_model, evidence_policy, detail, **kwargs):
+        ask_response = AskResponse(
+            question=question,
+            answer="solve answer",
+            results=[],
+            search_mode=search_mode,
+            scope=scope,
+            prefer=prefer,
+            per_file_cap=per_file_cap,
+            top_k=top_k,
+            llm_model=llm_model,
+            llm_called=False,
+            evidence_status="none",
+            evidence_policy=evidence_policy,
+            missing_phrases=[],
+            timing={"total_time_ms": 1.0},
+            detail=detail,
+        )
+        return SolveResponse(
+            question=question,
+            problem_type=ProblemType.DESIGN,
+            strategy="按模板作答。",
+            ask_response=ask_response,
+            requested_mode=mode,
+        )
+
+    executor = create_solve_executor(max_workers=1)
+    try:
+        job = submit_solve_job(executor, "设计一个 CNN", signature="sig", problem_type="design", solve_fn=fake_solve)
+        wait_for_job(job)
+    finally:
+        executor.shutdown(wait=True)
+
+    assert job.status == "done"
+    assert isinstance(job.result, SolveResponse)
+    assert job.result.problem_type == ProblemType.DESIGN
+    assert job.error is None
+
+
+def test_solve_job_error_saves_error_message() -> None:
+    def broken_solve(*args, **kwargs):
+        raise RuntimeError("solve failed")
+
+    executor = create_solve_executor(max_workers=1)
+    try:
+        job = submit_solve_job(executor, "bad problem", signature="sig", solve_fn=broken_solve)
+        wait_for_job(job)
+    finally:
+        executor.shutdown(wait=True)
+
+    assert job.status == "error"
+    assert job.result is None
+    assert job.error is not None
+    assert "solve failed" in job.error
+
+
 def test_error_job_saves_error_message() -> None:
     def broken_search(*args, **kwargs):
         raise RuntimeError("search failed")
@@ -158,12 +225,15 @@ def test_error_job_saves_error_message() -> None:
 def test_executor_max_workers_defaults_and_overrides() -> None:
     search_executor = create_search_executor()
     ask_executor = create_ask_executor(max_workers=2)
+    solve_executor = create_solve_executor()
     try:
         assert getattr(search_executor, "_max_workers") == 4
         assert getattr(ask_executor, "_max_workers") == 2
+        assert getattr(solve_executor, "_max_workers") == 1
     finally:
         search_executor.shutdown(wait=True)
         ask_executor.shutdown(wait=True)
+        solve_executor.shutdown(wait=True)
 
 
 def test_job_collapsed_state_helpers() -> None:
@@ -183,7 +253,9 @@ def test_job_collapsed_state_helpers() -> None:
 def test_queue_input_keys_are_mode_specific() -> None:
     assert queue_input_key("search") == "search_queue_input"
     assert queue_input_key("ask") == "ask_queue_input"
+    assert queue_input_key("solve") == "solve_queue_input"
     assert queue_input_key("search") != queue_input_key("ask")
+    assert queue_input_key("solve") != queue_input_key("ask")
 
 
 def test_jobs_in_submission_order_does_not_reverse() -> None:
@@ -198,10 +270,23 @@ def test_jobs_in_submission_order_does_not_reverse() -> None:
 def test_remove_job_by_id_removes_only_target() -> None:
     first = JobRecord(job_id="first", kind="search", input_text="q1", signature="sig1")
     second = JobRecord(job_id="second", kind="ask", input_text="q2", signature="sig2")
+    third = JobRecord(job_id="third", kind="solve", input_text="q3", signature="sig3")
 
-    remaining = remove_job_by_id([first, second], "first")
+    remaining = remove_job_by_id([first, second, third], "third")
 
-    assert remaining == [second]
+    assert remaining == [first, second]
+
+
+def test_solve_queue_state_helpers_do_not_affect_search_or_ask_jobs() -> None:
+    search_job = JobRecord(job_id="search", kind="search", input_text="q1", signature="sig1")
+    ask_job = JobRecord(job_id="ask", kind="ask", input_text="q2", signature="sig2")
+    solve_job = JobRecord(job_id="solve", kind="solve", input_text="q3", signature="sig3")
+    collapsed = toggle_job_collapsed(set(), solve_job.job_id)
+
+    assert is_job_collapsed(collapsed, "solve")
+    assert not is_job_collapsed(collapsed, "search")
+    assert not is_job_collapsed(collapsed, "ask")
+    assert remove_job_by_id([search_job, ask_job], solve_job.job_id) == [search_job, ask_job]
 
 
 def test_close_queued_job_cancels_future_and_removes_job() -> None:

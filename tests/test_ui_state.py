@@ -3,6 +3,7 @@ from __future__ import annotations
 from openexam.ui_state import (
     build_ask_signature,
     build_search_signature,
+    build_solve_signature,
     compact_index_status,
     compact_ollama_status,
     compact_source_status,
@@ -94,6 +95,36 @@ def test_ask_signature_tracks_answer_mode() -> None:
 
     assert ask != solve
     assert '"answer_mode": "solve"' in solve
+
+
+def test_solve_signature_tracks_problem_type() -> None:
+    calculation = build_solve_signature(
+        query="q",
+        problem_type="calculation",
+        mode="hybrid",
+        scope="all",
+        prefer="lecture",
+        per_file_cap=2,
+        top_k=6,
+        llm_model="qwen3:8b",
+        evidence_policy="warn",
+        detail="standard",
+    )
+    design = build_solve_signature(
+        query="q",
+        problem_type="design",
+        mode="hybrid",
+        scope="all",
+        prefer="lecture",
+        per_file_cap=2,
+        top_k=6,
+        llm_model="qwen3:8b",
+        evidence_policy="warn",
+        detail="standard",
+    )
+
+    assert calculation != design
+    assert '"problem_type": "calculation"' in calculation
 
 
 def test_search_signature_changes_when_parameters_change() -> None:

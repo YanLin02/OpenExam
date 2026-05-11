@@ -197,6 +197,8 @@ Derivation questions use a visible "goal, symbols, steps, conclusion" style temp
 
 Comparison questions use an "objects, common points, differences, pros/cons, suitable scenarios, exam summary" template. The answer includes task-specific comparison dimensions such as model structure, optimizer stability, loss behavior, regularization mechanism, or metric interpretation.
 
+In the Streamlit UI, choose `Solve exam problem` to submit one exam problem to its own queue. Search, Ask local AI, and Solve exam problem keep separate queues, so switching modes does not discard submitted work. Calculation questions that can be parsed use deterministic calculators and do not require the local LLM; design, derivation, compare, and open-ended solve answers still require a local chat model such as `qwen3:8b`.
+
 The output is a study and exam-answer draft. Adjust the level of detail and section emphasis to match the exact question wording.
 
 ## Semantic Search

@@ -63,7 +63,7 @@ class SolveResponse:
 
 _SOLVE_STRATEGIES: dict[ProblemType, str] = {
     ProblemType.CONCEPT: "先定位本地资料中的定义、作用和关键特征，再用短答方式组织结论并保留引用。",
-    ProblemType.CALCULATION: "先识别题目给出的已知量、目标量和适用公式；本轮先用本地资料与 Ask fallback 给出步骤化答案，后续计算器会接入这里。",
+    ProblemType.CALCULATION: "先识别题目给出的已知量、目标量和适用公式；可可靠解析时使用 deterministic calculator 计算数值结果，再补充本地依据。",
     ProblemType.DERIVATION: "先确认要推导的公式或过程，再按前提、关键变形和结论组织回答；本轮不展开符号计算器。",
     ProblemType.DESIGN: "先拆分任务目标、输入输出、模型/流程选择和评估方式，再给出可执行方案；本轮先使用本地资料生成基础设计答案。",
     ProblemType.COMPARE: "先列出比较维度，再分别说明相同点、差异点和适用场景，并用本地依据约束结论。",

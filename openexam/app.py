@@ -26,6 +26,7 @@ from openexam.jobs import (
     close_job_by_id,
     create_ask_executor,
     create_search_executor,
+    create_solve_executor,
     is_job_collapsed,
     job_elapsed_seconds,
     job_preview_prefix,
@@ -33,16 +34,19 @@ from openexam.jobs import (
     queue_input_key,
     submit_ask_job,
     submit_search_job,
+    submit_solve_job,
     toggle_job_collapsed,
     update_job_from_future,
 )
 from openexam.models import SearchResult
 from openexam.ollama_utils import choose_default_llm_model, ensure_ollama_running, list_ollama_models, stop_ollama_server
 from openexam.pdf_preview import PdfPreviewError, render_pdf_page
+from openexam.problem_types import ProblemType, classify_problem
 from openexam.solve import SolveResponse, render_solve_response
 from openexam.ui_state import (
     build_ask_signature,
     build_search_signature,
+    build_solve_signature,
     compact_index_status,
     compact_ollama_status,
     compact_source_status,
@@ -201,6 +205,15 @@ def get_search_executor(max_workers: int = 4):
 @st.cache_resource(show_spinner=False)
 def get_ask_executor():
     return create_ask_executor(max_workers=1)
+
+
+@st.cache_resource(show_spinner=False)
+def get_solve_executor():
+    return create_solve_executor(max_workers=1)
+
+
+def jobs_key_for_kind(kind: str) -> str:
+    return {"search": "search_jobs", "ask": "ask_jobs", "solve": "solve_jobs"}[kind]
 
 
 def clear_preview_state(prefix: str) -> None:
@@ -387,6 +400,8 @@ def render_job_card(job: JobRecord, result_key_prefix: str) -> None:
             return
         if job.kind == "search":
             render_search_job_result(job, result_key_prefix)
+        elif job.kind == "solve":
+            render_solve_job_result(job, result_key_prefix)
         else:
             render_ask_job_result(job, result_key_prefix)
 
@@ -421,15 +436,23 @@ def render_ask_job_result(job: JobRecord, result_key_prefix: str) -> None:
     render_ask_details(job.result, key_prefix=result_key_prefix)
 
 
+def render_solve_job_result(job: JobRecord, result_key_prefix: str) -> None:
+    if not isinstance(job.result, SolveResponse):
+        st.error("Solve job returned an unexpected result.")
+        return
+    st.markdown(render_solve_response(job.result).replace("\n", "  \n"))
+    render_ask_details(job.result.ask_response, key_prefix=result_key_prefix)
+
+
 def close_job_card(kind: str, job_id: str) -> None:
-    jobs_key = "search_jobs" if kind == "search" else "ask_jobs"
+    jobs_key = jobs_key_for_kind(kind)
     st.session_state[jobs_key] = close_job_by_id(session_jobs(jobs_key), job_id)
     st.session_state["collapsed_jobs"] = {collapsed_id for collapsed_id in collapsed_jobs() if collapsed_id != job_id}
     clear_preview_state(job_preview_prefix(kind, job_id))
 
 
 def clear_jobs(kind: str) -> None:
-    jobs_key = "search_jobs" if kind == "search" else "ask_jobs"
+    jobs_key = jobs_key_for_kind(kind)
     removed_job_ids = {job.job_id for job in session_jobs(jobs_key)}
     for job in session_jobs(jobs_key):
         if job.status == "queued" and job.future is not None:
@@ -440,7 +463,7 @@ def clear_jobs(kind: str) -> None:
 
 
 def render_job_queue(kind: str) -> None:
-    jobs_key = "search_jobs" if kind == "search" else "ask_jobs"
+    jobs_key = jobs_key_for_kind(kind)
     jobs = session_jobs(jobs_key)
     update_jobs(jobs)
     if not jobs:
@@ -449,46 +472,60 @@ def render_job_queue(kind: str) -> None:
     st.subheader("任务队列")
     if kind == "ask":
         st.caption("Ask local AI 固定单 worker 串行执行；关闭 running 卡片只会从 UI 隐藏，不会强制终止本地 LLM 请求。")
+    if kind == "solve":
+        st.caption("Solve exam problem 固定单 worker 串行执行；可解析计算题不会调用 LLM，其他题型会复用本地 Ask 能力。")
     for job in jobs_in_submission_order(jobs):
         render_job_card(job, result_key_prefix=job_preview_prefix(kind, job.job_id))
 
 
-def render_controls() -> tuple[str, str, str, int, str, int, str, str, str, str, str, bool, bool, bool]:
+def render_controls() -> tuple[str, str, str, str, int, str, int, str, str, str, str, str, bool, bool, bool]:
     top_cols = st.columns([2, 2, 2, 1])
-    action = top_cols[0].radio("Action", options=["Search", "Ask local AI"], horizontal=True)
-    is_ask = action == "Ask local AI"
-    kind = "ask" if is_ask else "search"
+    action = top_cols[0].radio("Action", options=["Search", "Ask local AI", "Solve exam problem"], horizontal=True)
+    kind = {"Search": "search", "Ask local AI": "ask", "Solve exam problem": "solve"}[action]
+    is_llm_mode = kind in {"ask", "solve"}
     mode = top_cols[1].selectbox("Mode", options=["hybrid", "keyword", "fuzzy", "semantic"], index=0)
     scope = top_cols[2].selectbox("Scope", options=["all", "lecture", "textbook_ocr", "other"], index=0)
-    top_default = DEFAULT_CONFIG.llm_context_top_k if is_ask else 10
+    top_default = DEFAULT_CONFIG.llm_context_top_k if is_llm_mode else 10
     top_k = top_cols[3].number_input("Top-k", min_value=1, max_value=50, value=top_default, step=1)
 
     query_cols = st.columns([8, 1.2, 1.2, 1.2])
     clear_pending_queue_input(kind)
+    placeholder = {
+        "search": "输入关键词或术语",
+        "ask": "输入本地资料问题",
+        "solve": "输入一道考试题",
+    }[kind]
     query = query_cols[0].text_input(
         "搜索 / 问题",
         key=queue_input_key(kind),
         label_visibility="collapsed",
-        placeholder="输入关键词、术语或问题",
+        placeholder=placeholder,
     )
-    submit_clicked = query_cols[1].button("搜索", type="primary", use_container_width=True)
+    submit_label = {"search": "搜索", "ask": "提问", "solve": "解题"}[kind]
+    submit_clicked = query_cols[1].button(submit_label, type="primary", use_container_width=True)
     clear_clicked = query_cols[2].button("清空队列", use_container_width=True)
     refresh_clicked = query_cols[3].button("刷新状态", use_container_width=True)
 
-    if is_ask:
-        param_cols = st.columns([1.4, 1, 1.4, 1.6, 1.6, 3])
+    if kind == "solve":
+        param_cols = st.columns([1.8, 1.4, 1, 1.4, 1.5, 3])
+    elif kind == "ask":
+        param_cols = st.columns([1.8, 1, 1.6, 1.6, 3])
     else:
         param_cols = st.columns([2, 1])
-    prefer = param_cols[0].selectbox("Prefer", options=["none", "lecture", "textbook_ocr"], index=1 if is_ask else 0)
-    cap_default = 2 if is_ask else 0
+    prefer = param_cols[0].selectbox("Prefer", options=["none", "lecture", "textbook_ocr"], index=1 if is_llm_mode else 0)
+    cap_default = 2 if is_llm_mode else 0
     per_file_cap = param_cols[1].number_input("Per-file cap", min_value=0, max_value=20, value=cap_default, step=1)
 
     evidence_policy = "warn"
     detail = "standard"
     llm_model = DEFAULT_CONFIG.llm_model
-    answer_mode = "ask"
-    if is_ask:
-        answer_mode = param_cols[2].selectbox("Answer mode", options=["ask", "solve"], index=0)
+    problem_type = "auto"
+    if kind == "solve":
+        problem_type = param_cols[2].selectbox(
+            "Problem type",
+            options=["auto", "calculation", "design", "derivation", "compare", "concept", "short_answer", "unknown"],
+            index=0,
+        )
         evidence_policy = param_cols[3].selectbox("Evidence", options=["warn", "strict", "open"], index=0)
         detail_label = param_cols[4].selectbox("Detail", options=["简洁", "标准", "详细"], index=1)
         detail = {"简洁": "concise", "标准": "standard", "详细": "detailed"}[detail_label]
@@ -499,15 +536,27 @@ def render_controls() -> tuple[str, str, str, int, str, int, str, str, str, str,
         else:
             model_index = models.index(selected_llm) if selected_llm in models else 0
             llm_model = param_cols[5].selectbox("LLM model", options=models, index=model_index)
+    elif kind == "ask":
+        evidence_policy = param_cols[2].selectbox("Evidence", options=["warn", "strict", "open"], index=0)
+        detail_label = param_cols[3].selectbox("Detail", options=["简洁", "标准", "详细"], index=1)
+        detail = {"简洁": "concise", "标准": "standard", "详细": "detailed"}[detail_label]
+        models, selected_llm = llm_model_options()
+        if selected_llm is None:
+            param_cols[4].warning("未找到本地 LLM 模型。")
+            llm_model = param_cols[4].text_input("LLM model", value=DEFAULT_CONFIG.llm_model)
+        else:
+            model_index = models.index(selected_llm) if selected_llm in models else 0
+            llm_model = param_cols[4].selectbox("LLM model", options=models, index=model_index)
     return (
         action,
+        kind,
         query,
+        problem_type,
         mode,
         int(top_k),
         scope,
         int(per_file_cap),
         prefer,
-        answer_mode,
         evidence_policy,
         detail,
         llm_model,
@@ -556,7 +605,6 @@ def submit_ask_queue_job(
     per_file_cap: int,
     top_k: int,
     llm_model: str,
-    answer_mode: str,
     evidence_policy: str,
     detail: str,
 ) -> bool:
@@ -568,7 +616,6 @@ def submit_ask_queue_job(
         return False
     signature = build_ask_signature(
         query=question,
-        answer_mode=answer_mode,
         mode=mode,
         scope=scope,
         prefer=prefer,
@@ -589,12 +636,62 @@ def submit_ask_queue_job(
         per_file_cap=per_file_cap,
         top_k=top_k,
         llm_model=llm_model,
-        answer_mode=answer_mode,
         evidence_policy=evidence_policy,
         detail=detail,
     )
     session_jobs("ask_jobs").append(job)
-    st.success(f"已提交 {'Solve' if answer_mode == 'solve' else 'Ask'} 任务。")
+    st.success("已提交 Ask 任务。")
+    return True
+
+
+def submit_solve_queue_job(
+    question: str,
+    problem_type: str,
+    mode: str,
+    scope: str,
+    prefer: str,
+    per_file_cap: int,
+    top_k: int,
+    llm_model: str,
+    evidence_policy: str,
+    detail: str,
+) -> bool:
+    if not question.strip():
+        st.warning("请输入一道考试题。")
+        return False
+    effective_problem_type = classify_problem(question).value if problem_type == "auto" else problem_type
+    if not DEFAULT_CONFIG.db_path.exists() and effective_problem_type != ProblemType.CALCULATION.value:
+        st.warning("还没有索引。可解析 calculation 题可直接计算；其他 solve 题型请先建立索引。")
+        return False
+    signature = build_solve_signature(
+        query=question,
+        problem_type=problem_type,
+        mode=mode,
+        scope=scope,
+        prefer=prefer,
+        per_file_cap=per_file_cap,
+        top_k=top_k,
+        llm_model=llm_model,
+        evidence_policy=evidence_policy,
+        detail=detail,
+    )
+    job = submit_solve_job(
+        get_solve_executor(),
+        question.strip(),
+        signature=signature,
+        config=DEFAULT_CONFIG,
+        problem_type=problem_type,
+        mode=mode,
+        scope=scope,
+        prefer=prefer,
+        per_file_cap=per_file_cap,
+        top_k=top_k,
+        llm_model=llm_model,
+        evidence_policy=evidence_policy,
+        detail=detail,
+    )
+    session_jobs("solve_jobs").append(job)
+    st.success("已提交 Solve 任务。")
     return True
 
 
@@ -605,13 +702,14 @@ def main() -> None:
     st.markdown("# OpenExam")
     (
         action,
+        kind,
         query,
+        problem_type,
         mode,
         top_k,
         scope,
         per_file_cap,
         prefer,
-        answer_mode,
         evidence_policy,
         detail,
         llm_model,
@@ -620,7 +718,6 @@ def main() -> None:
         refresh_clicked,
     ) = render_controls()
 
-    kind = "ask" if action == "Ask local AI" else "search"
     if clear_clicked:
         clear_jobs(kind)
         st.info("已清空队列。")
@@ -628,12 +725,16 @@ def main() -> None:
         if submit_search_queue_job(query, mode, scope, prefer, per_file_cap, top_k):
             mark_queue_input_for_clear(kind)
             rerun_app()
+    elif submit_clicked and kind == "ask":
+        if submit_ask_queue_job(query, mode, scope, prefer, per_file_cap, top_k, llm_model, evidence_policy, detail):
+            mark_queue_input_for_clear(kind)
+            rerun_app()
     elif submit_clicked:
-        if submit_ask_queue_job(query, mode, scope, prefer, per_file_cap, top_k, llm_model, answer_mode, evidence_policy, detail):
+        if submit_solve_queue_job(query, problem_type, mode, scope, prefer, per_file_cap, top_k, llm_model, evidence_policy, detail):
             mark_queue_input_for_clear(kind)
             rerun_app()
     elif refresh_clicked:
-        update_jobs(session_jobs("ask_jobs" if kind == "ask" else "search_jobs"))
+        update_jobs(session_jobs(jobs_key_for_kind(kind)))
         st.info("任务状态已刷新。")
 
     render_job_queue(kind)

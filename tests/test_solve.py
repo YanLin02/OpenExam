@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from openexam.__main__ import build_parser, cmd_solve
 from openexam.ask import AskResponse
+from openexam.compare_templates import CompareTaskType
 from openexam.config import AppConfig
+from openexam.derivation_templates import DerivationTaskType
 from openexam.design_templates import DesignTaskType
 from openexam.models import SearchResult
 from openexam.problem_types import ProblemType
@@ -158,6 +160,37 @@ def test_render_solve_response_contains_required_sections() -> None:
     assert "依据：" in rendered
     assert "来源：" in rendered
     assert "cnn.md" in rendered
+
+
+def test_render_solve_response_supports_derivation_and_compare() -> None:
+    derivation = SolveResponse(
+        question="推导 softmax 交叉熵的梯度",
+        problem_type=ProblemType.DERIVATION,
+        strategy="按步骤推导。",
+        ask_response=make_ask_response("推导 softmax 交叉熵的梯度"),
+        requested_mode="derivation",
+        derivation_task_type=DerivationTaskType.SOFTMAX_CROSS_ENTROPY,
+        derivation_sections=["推导目标", "Softmax 定义", "结论"],
+    )
+    compare = SolveResponse(
+        question="比较 CNN 和 Transformer 的区别",
+        problem_type=ProblemType.COMPARE,
+        strategy="按维度对比。",
+        ask_response=make_ask_response("比较 CNN 和 Transformer 的区别"),
+        requested_mode="compare",
+        compare_task_type=CompareTaskType.MODEL_COMPARISON,
+        compare_sections=["比较对象", "主要区别", "考试总结"],
+        comparison_dimensions=["结构", "长距离依赖"],
+    )
+
+    derivation_rendered = render_solve_response(derivation)
+    compare_rendered = render_solve_response(compare)
+
+    assert "推导任务类型：\nsoftmax_cross_entropy" in derivation_rendered
+    assert "推导结构：" in derivation_rendered
+    assert "对比任务类型：\nmodel_comparison" in compare_rendered
+    assert "比较维度：" in compare_rendered
+    assert "长距离依赖" in compare_rendered
 
 
 def test_cli_solve_parser_accepts_requested_arguments() -> None:

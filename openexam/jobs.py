@@ -15,7 +15,7 @@ from openexam.sources import SearchScope, SourcePreference
 
 
 JobStatus = Literal["queued", "running", "done", "error"]
-JobKind = Literal["search", "ask"]
+JobKind = Literal["search", "ask", "solve"]
 AnswerMode = Literal["ask", "solve"]
 
 
@@ -55,6 +55,10 @@ def create_search_executor(max_workers: int = 4) -> ThreadPoolExecutor:
 
 def create_ask_executor(max_workers: int = 1) -> ThreadPoolExecutor:
     return ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="openexam-ask")
+
+
+def create_solve_executor(max_workers: int = 1) -> ThreadPoolExecutor:
+    return ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="openexam-solve")
 
 
 def _run_search_job(
@@ -188,6 +192,73 @@ def submit_ask_job(
         detail=detail,
         answer_mode=answer_mode,
         ask_fn=ask_fn,
+        solve_fn=solve_fn,
+    )
+    return job
+
+
+def _run_solve_job(
+    question: str,
+    *,
+    config: AppConfig,
+    problem_type: str,
+    search_mode: SearchMode,
+    scope: SearchScope,
+    prefer: SourcePreference,
+    per_file_cap: int,
+    top_k: int,
+    llm_model: str,
+    evidence_policy: EvidencePolicy,
+    detail: AnswerDetail,
+    solve_fn: SolveFunction,
+) -> SolveResponse:
+    return solve_fn(
+        question,
+        mode=problem_type,
+        config=config,
+        search_mode=search_mode,
+        scope=scope,
+        prefer=prefer,
+        per_file_cap=per_file_cap,
+        top_k=top_k,
+        llm_model=llm_model,
+        evidence_policy=evidence_policy,
+        detail=detail,
+    )
+
+
+def submit_solve_job(
+    executor: ThreadPoolExecutor,
+    question: str,
+    *,
+    signature: str,
+    config: AppConfig = DEFAULT_CONFIG,
+    problem_type: str = "auto",
+    mode: SearchMode = "hybrid",
+    scope: SearchScope = "all",
+    prefer: SourcePreference = "lecture",
+    per_file_cap: int = 2,
+    top_k: int | None = None,
+    llm_model: str = DEFAULT_CONFIG.llm_model,
+    evidence_policy: EvidencePolicy = "warn",
+    detail: AnswerDetail = "standard",
+    solve_fn: SolveFunction = solve_question,
+) -> JobRecord:
+    effective_top_k = top_k if top_k is not None else config.llm_context_top_k
+    job = JobRecord(job_id=make_job_id(), kind="solve", input_text=question, signature=signature)
+    job.future = executor.submit(
+        _run_solve_job,
+        question,
+        config=config,
+        problem_type=problem_type,
+        search_mode=mode,
+        scope=scope,
+        prefer=prefer,
+        per_file_cap=per_file_cap,
+        top_k=effective_top_k,
+        llm_model=llm_model,
+        evidence_policy=evidence_policy,
+        detail=detail,
         solve_fn=solve_fn,
     )
     return job
