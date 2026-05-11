@@ -17,7 +17,7 @@ from openexam.ask import (
 )
 from openexam.config import DEFAULT_CONFIG
 from openexam.db import connect, failed_documents, index_stats
-from openexam.embeddings import embedding_status
+from openexam.embeddings import embed_if_needed, embedding_status
 from openexam.file_utils import open_local_file, reveal_local_file
 from openexam.ingest import ingest_directory
 from openexam.jobs import (
@@ -167,6 +167,11 @@ def render_sidebar() -> None:
     with st.sidebar:
         st.header("管理")
         data_dir = st.text_input("资料目录", value="", key="data_dir")
+        auto_embed_after_ingest = st.checkbox(
+            "索引后自动更新语义索引",
+            value=True,
+            help="建立或重建索引后自动运行本地 embedding。需要 Ollama 和 bge-m3；不会自动下载模型。",
+        )
         col1, col2 = st.columns(2)
         ingest_clicked = col1.button("建立/更新索引", type="primary", use_container_width=True)
         rebuild_clicked = col2.button("清空并重建", use_container_width=True)
@@ -192,6 +197,26 @@ def render_sidebar() -> None:
                             for path, error in stats.errors:
                                 st.caption(path)
                                 st.caption(error)
+                    if auto_embed_after_ingest:
+                        conn = connect(DEFAULT_CONFIG.db_path)
+                        try:
+                            chunk_count = int(index_stats(conn)["chunks"])
+                        finally:
+                            conn.close()
+                        if chunk_count == 0 or stats.indexed_files + stats.skipped_files == 0:
+                            st.info("语义索引跳过：没有可嵌入的 chunks。")
+                        else:
+                            with st.spinner("正在更新语义索引..."):
+                                embed_result = embed_if_needed(DEFAULT_CONFIG, auto_start_ollama=True)
+                            if embed_result.status == "ready":
+                                st.success(
+                                    f"语义索引已更新：{embed_result.chunks_embedded} chunks, "
+                                    f"{embed_result.elapsed_time_ms:.1f} ms."
+                                )
+                            elif embed_result.status == "skipped":
+                                st.info("语义索引已是最新。")
+                            else:
+                                st.warning(embed_result.message)
 
         st.divider()
         st.subheader("索引状态")

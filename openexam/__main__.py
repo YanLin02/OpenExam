@@ -7,7 +7,7 @@ from pathlib import Path
 from openexam.ask import LLMError, ask_question, render_ask_response
 from openexam.config import DEFAULT_CONFIG
 from openexam.db import connect, failed_documents, index_stats
-from openexam.embeddings import EmbeddingError, build_embeddings, embedding_status
+from openexam.embeddings import EmbedResult, EmbeddingError, embed_if_needed, embedding_status
 from openexam.file_utils import file_uri, open_local_file, open_pdf_page_in_chrome
 from openexam.ingest import ingest_directory
 from openexam.ollama_utils import ensure_ollama_running
@@ -34,7 +34,31 @@ def cmd_ingest(args: argparse.Namespace) -> int:
         for path, error in stats.errors:
             print(f"- {path}: {error}")
     print(f"\nIndex database: {DEFAULT_CONFIG.db_path}")
+    if args.embed:
+        conn = connect(DEFAULT_CONFIG.db_path)
+        try:
+            chunk_count = int(index_stats(conn)["chunks"])
+        finally:
+            conn.close()
+        if chunk_count == 0:
+            print("\nEmbed skipped: no chunks to embed.")
+        else:
+            result = embed_if_needed(DEFAULT_CONFIG, auto_start_ollama=args.auto_start_ollama)
+            print_embed_result(result, prefix="\nEmbed")
+            if result.status == "failed":
+                print("Embed warning: index was written, but semantic search is not ready.", file=sys.stderr)
     return 0 if stats.failed_files == 0 else 1
+
+
+def print_embed_result(result: EmbedResult, prefix: str = "Embed") -> None:
+    print(f"{prefix} status: {result.status}")
+    print(f"Embed model: {result.model}")
+    print(f"Embedded chunks: {result.chunks_embedded}")
+    print(f"Embed elapsed: {result.elapsed_time_ms:.1f} ms")
+    print(f"Embed message: {result.message}")
+    if result.stats is not None:
+        print(f"Vectors: {result.stats.npy_path}")
+        print(f"Metadata: {result.stats.json_path}")
 
 
 def _format_location(result) -> str:
@@ -213,27 +237,16 @@ def cmd_embed(args: argparse.Namespace) -> int:
     if not DEFAULT_CONFIG.db_path.exists():
         print(f"Index not found: {DEFAULT_CONFIG.db_path}. Run ingest first.", file=sys.stderr)
         return 2
-    try:
-        ollama_status = ensure_ollama_running(
-            DEFAULT_CONFIG.ollama_base_url,
-            auto_start=args.auto_start_ollama,
-            log_path=DEFAULT_CONFIG.index_dir / "ollama.log",
-        )
-        if not ollama_status.reachable:
-            print(f"Embedding failed: {ollama_status.message}", file=sys.stderr)
-            return 2
-        stats = build_embeddings(DEFAULT_CONFIG)
-    except EmbeddingError as exc:
-        print(f"Embedding failed: {exc}", file=sys.stderr)
+    result = embed_if_needed(DEFAULT_CONFIG, auto_start_ollama=args.auto_start_ollama, force=True)
+    if result.status == "failed":
+        print(f"Embedding failed: {result.message}", file=sys.stderr)
         print("If Ollama is not running, start it with: ollama serve", file=sys.stderr)
         print("If the model is missing, pull it while online: ollama pull bge-m3", file=sys.stderr)
         return 2
     print(f"Embedding provider: {DEFAULT_CONFIG.embedding_provider}")
-    print(f"Embedding model: {stats.model}")
-    print(f"Embedded chunks: {stats.chunk_count}")
-    print(f"Vector dimension: {stats.vector_dim}")
-    print(f"Vectors: {stats.npy_path}")
-    print(f"Metadata: {stats.json_path}")
+    print_embed_result(result, prefix="Embed")
+    if result.stats is not None:
+        print(f"Vector dimension: {result.stats.vector_dim}")
     return 0
 
 
@@ -289,6 +302,10 @@ def build_parser() -> argparse.ArgumentParser:
     ingest_parser = subparsers.add_parser("ingest", help="Index a local file or directory.")
     ingest_parser.add_argument("path", help="Local file or directory to index.")
     ingest_parser.add_argument("--rebuild", action="store_true", help="Clear the existing index before ingesting.")
+    ingest_parser.add_argument("--embed", dest="embed", action="store_true", default=False, help="Run semantic embedding update after ingest succeeds. Default: disabled.")
+    ingest_parser.add_argument("--no-embed", dest="embed", action="store_false", help="Do not run embeddings after ingest. Default.")
+    ingest_parser.add_argument("--auto-start-ollama", dest="auto_start_ollama", action="store_true", default=True, help="Try to start `ollama serve` for --embed if needed. Default: enabled.")
+    ingest_parser.add_argument("--no-auto-start-ollama", dest="auto_start_ollama", action="store_false", help="Do not try to start Ollama automatically for --embed.")
     ingest_parser.set_defaults(func=cmd_ingest)
 
     embed_parser = subparsers.add_parser("embed", help="Build local Ollama embeddings for indexed chunks.")

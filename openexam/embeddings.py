@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -12,6 +13,7 @@ from typing import Any
 import numpy as np
 
 from openexam.config import AppConfig, DEFAULT_CONFIG
+from openexam.ollama_utils import ensure_ollama_running
 from openexam.text_utils import sha256_text
 
 
@@ -39,6 +41,16 @@ class EmbedStats:
     vector_dim: int
     npy_path: Path
     json_path: Path
+
+
+@dataclass(frozen=True)
+class EmbedResult:
+    status: str
+    chunks_embedded: int
+    model: str
+    elapsed_time_ms: float
+    message: str
+    stats: EmbedStats | None = None
 
 
 def utc_now() -> str:
@@ -97,6 +109,17 @@ def _load_chunks(conn: sqlite3.Connection) -> list[sqlite3.Row]:
     )
 
 
+def _count_chunks(config: AppConfig) -> int:
+    if not config.db_path.exists():
+        return 0
+    conn = sqlite3.connect(config.db_path)
+    try:
+        row = conn.execute("SELECT COUNT(*) FROM chunks").fetchone()
+        return int(row[0]) if row is not None else 0
+    finally:
+        conn.close()
+
+
 def build_embeddings(config: AppConfig = DEFAULT_CONFIG) -> EmbedStats:
     config.index_dir.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(config.db_path)
@@ -143,6 +166,74 @@ def build_embeddings(config: AppConfig = DEFAULT_CONFIG) -> EmbedStats:
         vector_dim=int(matrix.shape[1]),
         npy_path=config.embeddings_npy_path,
         json_path=config.embeddings_json_path,
+    )
+
+
+def embed_if_needed(
+    config: AppConfig = DEFAULT_CONFIG,
+    auto_start_ollama: bool = True,
+    force: bool = False,
+) -> EmbedResult:
+    started_at = time.perf_counter()
+    status = embedding_status(config)
+    if status.valid and not force:
+        return EmbedResult(
+            status="skipped",
+            chunks_embedded=0,
+            model=status.model,
+            elapsed_time_ms=(time.perf_counter() - started_at) * 1000,
+            message="already_ready",
+        )
+    if not config.db_path.exists():
+        return EmbedResult(
+            status="failed",
+            chunks_embedded=0,
+            model=config.embedding_model,
+            elapsed_time_ms=(time.perf_counter() - started_at) * 1000,
+            message="SQLite index not found. Run ingest before embed.",
+        )
+    chunk_count = _count_chunks(config)
+    if chunk_count == 0:
+        return EmbedResult(
+            status="failed",
+            chunks_embedded=0,
+            model=config.embedding_model,
+            elapsed_time_ms=(time.perf_counter() - started_at) * 1000,
+            message="No chunks found. Run ingest before embed.",
+        )
+
+    ollama_status = ensure_ollama_running(
+        config.ollama_base_url,
+        auto_start=auto_start_ollama,
+        log_path=config.index_dir / "ollama.log",
+        wait_seconds=20.0,
+    )
+    if not ollama_status.reachable:
+        return EmbedResult(
+            status="failed",
+            chunks_embedded=0,
+            model=config.embedding_model,
+            elapsed_time_ms=(time.perf_counter() - started_at) * 1000,
+            message=f"{status.message} Auto embed failed: {ollama_status.message}",
+        )
+
+    try:
+        stats = build_embeddings(config)
+    except EmbeddingError as exc:
+        return EmbedResult(
+            status="failed",
+            chunks_embedded=0,
+            model=config.embedding_model,
+            elapsed_time_ms=(time.perf_counter() - started_at) * 1000,
+            message=f"{status.message} Auto embed failed: {exc}",
+        )
+    return EmbedResult(
+        status="ready",
+        chunks_embedded=stats.chunk_count,
+        model=stats.model,
+        elapsed_time_ms=(time.perf_counter() - started_at) * 1000,
+        message="Semantic index is ready.",
+        stats=stats,
     )
 
 

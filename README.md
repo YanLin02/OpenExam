@@ -44,7 +44,7 @@ Install dependencies before you need offline access. Do not commit `.openexam/`;
 Build or rebuild the local index:
 
 ```bash
-python -m openexam ingest "/path/to/documents" --rebuild
+python -m openexam ingest "/path/to/documents" --rebuild --embed
 ```
 
 Check index status:
@@ -134,6 +134,14 @@ Rebuild the index from scratch:
 python -m openexam ingest "./docs" --rebuild
 ```
 
+Rebuild and update semantic embeddings in one command:
+
+```bash
+python -m openexam ingest "./docs" --rebuild --embed
+```
+
+`ingest` defaults to `--no-embed` for CLI compatibility. Use `--embed` when you want semantic and hybrid search to be ready immediately. If Ollama is not running or `bge-m3` is missing, the keyword index remains usable, but semantic search is unavailable until you start Ollama and pull the model.
+
 The default index is stored under:
 
 ```text
@@ -175,6 +183,8 @@ Build local semantic embeddings after ingesting documents:
 python -m openexam embed
 ```
 
+The Streamlit UI has `索引后自动更新语义索引` enabled by default in the sidebar index controls. Turn it off, or use CLI `--no-embed`, when you only need a quick keyword index.
+
 ### Ask
 
 Ask a local cited question using retrieved chunks:
@@ -210,8 +220,7 @@ Calculation parsing includes common CNN shape forms such as `3x32x32`, explicit 
 The exam answer bank is a lightweight priority retrieval layer for `concept` and `short_answer` questions. By default, OpenExam no longer prioritizes files by specific built-in filenames. Put answer-bank files under a recognized directory such as `data/answer_bank/`, then rerun ingest:
 
 ```bash
-python -m openexam ingest /path/to/materials --rebuild
-python -m openexam embed
+python -m openexam ingest /path/to/materials --rebuild --embed
 python -m openexam status
 ```
 
@@ -301,6 +310,8 @@ Build embeddings:
 
 ```bash
 python -m openexam embed
+# or during ingest:
+python -m openexam ingest "/path/to/documents" --rebuild --embed
 ```
 
 Embedding artifacts are saved locally:
