@@ -8,6 +8,7 @@ from typing import Literal
 from openexam.config import DEFAULT_CONFIG, AppConfig
 from openexam.embeddings import EmbeddingError, semantic_scores
 from openexam.models import SearchResult
+from openexam.priority_sources import merge_priority_results
 from openexam.search.fts import all_chunks_for_fuzzy, fts_search, normalized_query
 from openexam.search.fuzzy import fuzzy_score
 from openexam.search.rank import (
@@ -75,6 +76,7 @@ def search_index(
     prefer: SourcePreference = "none",
     per_file_cap: int = 0,
     timing: dict[str, float] | None = None,
+    priority_answer_bank: bool = False,
 ) -> list[SearchResult]:
     total_start = time.perf_counter()
     if mode not in {"keyword", "fuzzy", "hybrid", "semantic"}:
@@ -195,6 +197,7 @@ def search_index(
         if timing is not None:
             timing["ranking_time_ms"] = (time.perf_counter() - ranking_start) * 1000
             timing["total_time_ms"] = (time.perf_counter() - total_start) * 1000
+        result_limit = max(top_k * 5, 50) if priority_answer_bank else top_k
         if per_file_cap > 0:
             capped: list[SearchResult] = []
             counts: dict[str, int] = {}
@@ -204,9 +207,9 @@ def search_index(
                     continue
                 counts[result.source_path] = count + 1
                 capped.append(result)
-                if len(capped) >= top_k:
+                if len(capped) >= result_limit:
                     break
-            return capped
-        return results[:top_k]
+            return merge_priority_results(capped, top_k=top_k, priority_enabled=priority_answer_bank, config=config)
+        return merge_priority_results(results, top_k=top_k, priority_enabled=priority_answer_bank, config=config)
     finally:
         conn.close()

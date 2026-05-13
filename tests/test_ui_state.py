@@ -61,6 +61,7 @@ def test_ask_signature_changes_when_parameters_change() -> None:
         llm_model="qwen3:8b",
         evidence_policy="warn",
         detail="standard",
+        priority_answer_bank=True,
     )
 
     assert base != changed
@@ -69,8 +70,18 @@ def test_ask_signature_changes_when_parameters_change() -> None:
 def test_search_signature_changes_when_parameters_change() -> None:
     base = build_search_signature(query="q", mode="hybrid", scope="all", prefer="none", per_file_cap=0, top_k=10)
     changed = build_search_signature(query="q", mode="keyword", scope="all", prefer="none", per_file_cap=0, top_k=10)
+    priority_changed = build_search_signature(
+        query="q",
+        mode="hybrid",
+        scope="all",
+        prefer="none",
+        per_file_cap=0,
+        top_k=10,
+        priority_answer_bank=True,
+    )
 
     assert base != changed
+    assert base != priority_changed
     assert build_search_signature(query="q", mode="hybrid", scope="all", prefer="none", per_file_cap=0, top_k=10) == base
 
 

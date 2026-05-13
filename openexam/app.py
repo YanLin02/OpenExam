@@ -39,6 +39,11 @@ from openexam.jobs import (
 from openexam.models import SearchResult
 from openexam.ollama_utils import choose_default_llm_model, ensure_ollama_running, list_ollama_models, stop_ollama_server
 from openexam.pdf_preview import PdfPreviewError, render_pdf_page
+from openexam.priority_sources import (
+    exam_answer_bank_label_for_result,
+    find_indexed_answer_bank_sources,
+    load_priority_source_config,
+)
 from openexam.ui_state import (
     build_ask_signature,
     build_search_signature,
@@ -68,7 +73,7 @@ def show_parameter_help() -> None:
 - `scope`: `all` 搜索全部资料；`lecture` 只搜索课件；`textbook_ocr` 只搜索 OCR 教材；`other` 只搜索其他文件。
 - `prefer`: `none` 不偏向任何来源；`lecture` 轻微优先课件；`textbook_ocr` 轻微优先教材。
 - `per-file-cap`: 限制同一文件最多出现几条结果，避免单个 PDF 霸榜。
-- `evidence-policy`: `strict` 证据不足就拒答；`warn` 证据不足也回答但显式标注，考试推荐；`open` 无本地依据也回答但标注无本地来源。
+- `evidence-policy`: `strict` 证据不足就拒答；`warn` 证据不足也回答但显式标注，默认推荐；`open` 无本地依据也回答但标注无本地来源。
 - `top-k`: 返回或提供给 LLM 的片段数量，越大越全面但越慢。
 - `detail`: `concise` 快速定位；`standard` 考试推荐；`detailed` 适合复习理解。
 """
@@ -104,6 +109,17 @@ def render_index_status() -> None:
             )
         )
         st.sidebar.caption(f"Embedding model: {semantic.model}. {semantic.message}")
+        answer_bank_sources = find_indexed_answer_bank_sources(DEFAULT_CONFIG)
+        st.sidebar.caption(f"Priority answer bank: indexed {len(answer_bank_sources)}")
+        priority_config = load_priority_source_config(DEFAULT_CONFIG)
+        for warning in priority_config.warnings:
+            st.sidebar.warning(warning)
+        if answer_bank_sources:
+            with st.sidebar.expander("Indexed answer bank files", expanded=False):
+                for source in answer_bank_sources:
+                    st.caption(source)
+        else:
+            st.sidebar.caption("Add files under answer_bank/ and rebuild the index to enable priority answer bank sources.")
         failures = failed_documents(conn, limit=10)
         if failures:
             with st.sidebar.expander("Recent failed files", expanded=False):
@@ -272,9 +288,11 @@ def render_search_result_card(result: SearchResult, index: int, key_prefix: str 
     card_key = f"{key_prefix}-{result.chunk_db_id}"
     with st.container(border=True):
         st.markdown(f"**{index}. {result.file_name}**")
+        priority_label = exam_answer_bank_label_for_result(result)
+        priority_text = f" | answer_bank={priority_label}" if priority_label else ""
         st.caption(
             f"{format_location(result)} | {result.source_type} | score {result.score:.2f} | "
-            f"{result.mode} | {result.match_type}"
+            f"{result.mode} | {result.match_type}{priority_text}"
         )
         st.write(result.snippet)
         render_path_expander(result.source_path, f"{card_key}-path")
@@ -295,7 +313,9 @@ def ask_answer_text(response) -> str:
 def render_source_card(result: SearchResult, index: int, key_prefix: str) -> None:
     with st.container(border=True):
         st.markdown(f"**[{index}] {result.file_name}**")
-        st.caption(f"{format_location(result)} | {result.source_type} | score {result.score:.2f}")
+        priority_label = exam_answer_bank_label_for_result(result)
+        priority_text = f" | answer_bank={priority_label}" if priority_label else ""
+        st.caption(f"{format_location(result)} | {result.source_type} | score {result.score:.2f}{priority_text}")
         st.write(format_evidence(result, index))
         render_path_expander(result.source_path, f"{key_prefix}-path-{index}-{result.chunk_db_id}")
         render_file_actions(result.source_path, result.page_number, f"{key_prefix}-{index}-{result.chunk_db_id}", result.chunk_db_id)
@@ -314,6 +334,8 @@ def render_ask_summary(response, stale: bool = False) -> None:
         f"llm {response.timing.get('llm_time_ms', 0.0):.1f} ms"
     )
     st.caption(f"{config_text} | llm_model={response.llm_model} | policy={response.evidence_policy} | detail={response.detail}")
+    if getattr(response, "priority_answer_bank", False):
+        st.caption("Priority answer bank: enabled")
     st.markdown(ask_answer_text(response).replace("\n", "  \n"))
 
 
@@ -448,7 +470,7 @@ def render_job_queue(kind: str) -> None:
         render_job_card(job, result_key_prefix=job_preview_prefix(kind, job.job_id))
 
 
-def render_controls() -> tuple[str, str, str, int, str, int, str, str, str, bool, bool, bool]:
+def render_controls() -> tuple[str, str, str, int, str, int, str, str, str, str, bool, bool, bool, bool]:
     top_cols = st.columns([2, 2, 2, 1])
     action = top_cols[0].radio("Action", options=["Search", "Ask local AI"], horizontal=True)
     is_ask = action == "Ask local AI"
@@ -492,6 +514,11 @@ def render_controls() -> tuple[str, str, str, int, str, int, str, str, str, bool
         else:
             model_index = models.index(selected_llm) if selected_llm in models else 0
             llm_model = param_cols[4].selectbox("LLM model", options=models, index=model_index)
+    priority_answer_bank = st.checkbox(
+        "优先答案库",
+        value=False,
+        help="优先展示已索引 answer_bank/、exam_answer_bank/、priority_sources/、易考/、重点/、答案库/ 目录或 .openexam/priority_sources.json 中配置的资料。",
+    )
     return (
         action,
         query,
@@ -503,13 +530,14 @@ def render_controls() -> tuple[str, str, str, int, str, int, str, str, str, bool
         evidence_policy,
         detail,
         llm_model,
+        priority_answer_bank,
         submit_clicked,
         clear_clicked,
         refresh_clicked,
     )
 
 
-def submit_search_queue_job(query: str, mode: str, scope: str, prefer: str, per_file_cap: int, top_k: int) -> bool:
+def submit_search_queue_job(query: str, mode: str, scope: str, prefer: str, per_file_cap: int, top_k: int, priority_answer_bank: bool) -> bool:
     if not query.strip():
         st.warning("请输入搜索内容。")
         return False
@@ -523,6 +551,7 @@ def submit_search_queue_job(query: str, mode: str, scope: str, prefer: str, per_
         prefer=prefer,
         per_file_cap=per_file_cap,
         top_k=top_k,
+        priority_answer_bank=priority_answer_bank,
     )
     job = submit_search_job(
         get_search_executor(max_workers=4),
@@ -534,6 +563,7 @@ def submit_search_queue_job(query: str, mode: str, scope: str, prefer: str, per_
         prefer=prefer,
         per_file_cap=per_file_cap,
         top_k=top_k,
+        priority_answer_bank=priority_answer_bank,
     )
     session_jobs("search_jobs").append(job)
     st.success("已提交搜索任务。")
@@ -550,6 +580,7 @@ def submit_ask_queue_job(
     llm_model: str,
     evidence_policy: str,
     detail: str,
+    priority_answer_bank: bool,
 ) -> bool:
     if not question.strip():
         st.warning("请输入问题。")
@@ -567,6 +598,7 @@ def submit_ask_queue_job(
         llm_model=llm_model,
         evidence_policy=evidence_policy,
         detail=detail,
+        priority_answer_bank=priority_answer_bank,
     )
     job = submit_ask_job(
         get_ask_executor(),
@@ -581,6 +613,7 @@ def submit_ask_queue_job(
         llm_model=llm_model,
         evidence_policy=evidence_policy,
         detail=detail,
+        priority_answer_bank=priority_answer_bank,
     )
     session_jobs("ask_jobs").append(job)
     st.success("已提交 Ask 任务。")
@@ -603,6 +636,7 @@ def main() -> None:
         evidence_policy,
         detail,
         llm_model,
+        priority_answer_bank,
         submit_clicked,
         clear_clicked,
         refresh_clicked,
@@ -613,11 +647,11 @@ def main() -> None:
         clear_jobs(kind)
         st.info("已清空队列。")
     elif submit_clicked and kind == "search":
-        if submit_search_queue_job(query, mode, scope, prefer, per_file_cap, top_k):
+        if submit_search_queue_job(query, mode, scope, prefer, per_file_cap, top_k, priority_answer_bank):
             mark_queue_input_for_clear(kind)
             rerun_app()
     elif submit_clicked:
-        if submit_ask_queue_job(query, mode, scope, prefer, per_file_cap, top_k, llm_model, evidence_policy, detail):
+        if submit_ask_queue_job(query, mode, scope, prefer, per_file_cap, top_k, llm_model, evidence_policy, detail, priority_answer_bank):
             mark_queue_input_for_clear(kind)
             rerun_app()
     elif refresh_clicked:

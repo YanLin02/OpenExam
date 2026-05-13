@@ -11,6 +11,7 @@ from openexam.embeddings import EmbeddingError, build_embeddings, embedding_stat
 from openexam.file_utils import file_uri, open_local_file, open_pdf_page_in_chrome
 from openexam.ingest import ingest_directory
 from openexam.ollama_utils import ensure_ollama_running
+from openexam.priority_sources import find_indexed_answer_bank_sources, load_priority_source_config
 from openexam.search import search_index
 
 
@@ -71,6 +72,7 @@ def cmd_search(args: argparse.Namespace) -> int:
             prefer=args.prefer,
             per_file_cap=args.per_file_cap,
             timing=timing,
+            priority_answer_bank=args.priority_answer_bank,
         )
     except EmbeddingError as exc:
         print(f"Semantic search unavailable: {exc}", file=sys.stderr)
@@ -130,6 +132,7 @@ def cmd_ask(args: argparse.Namespace) -> int:
             evidence_policy=args.evidence_policy,
             detail=args.detail,
             auto_start_ollama=args.auto_start_ollama,
+            priority_answer_bank=args.priority_answer_bank,
         )
     except EmbeddingError as exc:
         print(f"Retrieval unavailable: {exc}", file=sys.stderr)
@@ -194,6 +197,13 @@ def cmd_status(args: argparse.Namespace) -> int:
         print(f"Lecture documents: {stats['lecture_documents']}")
         print(f"Textbook OCR documents: {stats['textbook_ocr_documents']}")
         print(f"Other documents: {stats['other_documents']}")
+        answer_bank_sources = find_indexed_answer_bank_sources(DEFAULT_CONFIG)
+        print(f"Exam answer bank: {len(answer_bank_sources)} indexed")
+        priority_config = load_priority_source_config(DEFAULT_CONFIG)
+        for warning in priority_config.warnings:
+            print(f"Exam answer bank warning: {warning}")
+        for source in answer_bank_sources:
+            print(f"- {source}")
         print(f"Latest indexed at: {stats['latest_indexed_at']}")
         semantic = embedding_status(DEFAULT_CONFIG)
         print(f"Semantic index: {'ready' if semantic.valid else 'not ready'}")
@@ -257,6 +267,8 @@ def build_parser() -> argparse.ArgumentParser:
         default=0,
         help="Maximum results per file. 0 disables the cap.",
     )
+    search_parser.add_argument("--priority-answer-bank", dest="priority_answer_bank", action="store_true", default=False, help="Prioritize indexed files detected as priority answer bank sources.")
+    search_parser.add_argument("--no-priority-answer-bank", dest="priority_answer_bank", action="store_false", help="Do not prioritize indexed priority answer bank sources.")
     search_parser.add_argument("--open-first", action="store_true", help="Open the top result file with macOS `open`.")
     search_parser.add_argument(
         "--open-first-method",
@@ -312,6 +324,8 @@ def build_parser() -> argparse.ArgumentParser:
         default="standard",
         help="Answer detail level. concise is short, standard is default, detailed gives a longer explanation.",
     )
+    ask_parser.add_argument("--priority-answer-bank", dest="priority_answer_bank", action="store_true", default=False, help="Prioritize indexed files detected as priority answer bank sources.")
+    ask_parser.add_argument("--no-priority-answer-bank", dest="priority_answer_bank", action="store_false", help="Do not prioritize indexed priority answer bank sources.")
     ask_parser.add_argument("--auto-start-ollama", dest="auto_start_ollama", action="store_true", default=True, help="Try to start `ollama serve` if Ollama is not reachable. Default: enabled.")
     ask_parser.add_argument("--no-auto-start-ollama", dest="auto_start_ollama", action="store_false", help="Do not try to start Ollama automatically.")
     ask_parser.set_defaults(func=cmd_ask)

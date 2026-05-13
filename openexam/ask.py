@@ -68,6 +68,7 @@ class AskResponse:
     missing_phrases: list[str]
     timing: dict[str, float]
     detail: AnswerDetail
+    priority_answer_bank: bool = False
 
 
 def format_location(result: SearchResult) -> str:
@@ -122,7 +123,7 @@ def build_ask_prompt(
         "standard": "回答长度适中，覆盖问题主要方面，并保留必要引用。",
         "detailed": "可以分点说明并展开解释，但不得为了详细而编造来源；所有本地资料结论都必须保留引用。",
     }
-    return f"""你是一个离线开卷考试资料检索助手。
+    return f"""你是一个离线开卷资料检索和本地问答助手。
 
 资料依据状态：{evidence_status}
 缺失关键点：{missing}
@@ -256,7 +257,7 @@ def render_ask_response(response: AskResponse) -> str:
             "资料依据状态：\nnone\n\n"
             "依据：\n无本地依据\n\n"
             "来源：\n无本地来源\n\n"
-            "补充说明：\n模型回答主要来自通用知识，考试使用时请谨慎核对。"
+            "补充说明：\n模型回答主要来自通用知识，使用时请谨慎核对。"
         )
     evidence = "\n".join(format_evidence(result, index) for index, result in enumerate(response.results, start=1))
     sources = "\n".join(format_source(result, index) for index, result in enumerate(response.results, start=1))
@@ -270,7 +271,7 @@ def render_ask_response(response: AskResponse) -> str:
             f"资料依据状态：\npartial，缺失关键点：{missing}\n\n"
             f"依据：\n{evidence}\n\n"
             f"来源：\n{sources}\n\n"
-            "补充说明：\n本回答包含模型基于通用知识的补充解释；考试使用时请优先核对上方本地来源。"
+            "补充说明：\n本回答包含模型基于通用知识的补充解释；使用时请优先核对上方本地来源。"
         )
     return f"回答：\n{answer}\n\n依据：\n{evidence}\n\n来源：\n{sources}"
 
@@ -287,6 +288,7 @@ def ask_question(
     evidence_policy: EvidencePolicy = "warn",
     detail: AnswerDetail = "standard",
     auto_start_ollama: bool = True,
+    priority_answer_bank: bool = False,
 ) -> AskResponse:
     total_start = time.perf_counter()
     effective_top_k = top_k if top_k is not None else config.llm_context_top_k
@@ -304,6 +306,7 @@ def ask_question(
         prefer=prefer,
         per_file_cap=per_file_cap,
         timing=search_timing,
+        priority_answer_bank=priority_answer_bank,
     )
     retrieval_time_ms = (time.perf_counter() - retrieval_start) * 1000
     evidence_status, missing_phrases = evidence_status_for_question(question, results)
@@ -329,6 +332,7 @@ def ask_question(
                 "total_time_ms": (time.perf_counter() - total_start) * 1000,
             },
             detail=detail,
+            priority_answer_bank=priority_answer_bank,
         )
     prompt_start = time.perf_counter()
     prompt = build_ask_prompt(question, results, evidence_status=evidence_status, missing_phrases=missing_phrases, detail=detail)
@@ -360,4 +364,5 @@ def ask_question(
             "total_time_ms": (time.perf_counter() - total_start) * 1000,
         },
         detail=detail,
+        priority_answer_bank=priority_answer_bank,
     )
