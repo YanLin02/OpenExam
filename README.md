@@ -10,11 +10,11 @@ Search runs against a local SQLite index. Semantic retrieval and local answers u
 - Search with `keyword`, `fuzzy`, `hybrid`, or `semantic` modes.
 - Build local semantic embeddings with Ollama, using `bge-m3` by default.
 - Ask local AI with cited evidence from retrieved chunks, using `qwen3:8b` by default.
-- Use a priority answer bank for curated Markdown, TXT, PDF, DOCX, or PPTX sources.
+- Use Priority sources for curated Markdown, TXT, PDF, DOCX, or PPTX files.
 - Run a Streamlit UI with Search and Ask local AI modes.
 - Inspect PDF page previews inside the UI when page numbers are available.
 - Open local files or reveal them in Finder on macOS.
-- Check index, semantic, Ollama, and priority answer bank status.
+- Check index, semantic, Ollama, and Priority sources status.
 
 ## Supported Files
 
@@ -109,7 +109,7 @@ Useful options:
 - `--scope all|lecture|textbook_ocr|other`: restrict by inferred source type.
 - `--prefer none|lecture|textbook_ocr`: lightly boost a source type without filtering.
 - `--per-file-cap N`: limit repeated results from the same file.
-- `--priority-answer-bank` / `--no-priority-answer-bank`: prioritize detected answer bank sources.
+- `--priority-answer-bank` / `--no-priority-answer-bank`: prioritize detected Priority sources.
 - `--open-first`: open the top result file with the operating system.
 - `--auto-start-ollama` / `--no-auto-start-ollama`: control local Ollama startup for semantic search.
 
@@ -165,7 +165,7 @@ Useful options:
 - `--evidence-policy strict|warn|open`: choose how missing or partial local evidence is handled.
 - `--detail concise|standard|detailed`: control answer length.
 - `--llm-model MODEL`: select a local Ollama chat model.
-- `--priority-answer-bank` / `--no-priority-answer-bank`: prioritize detected answer bank sources during retrieval.
+- `--priority-answer-bank` / `--no-priority-answer-bank`: prioritize detected Priority sources during retrieval.
 
 If local evidence is insufficient under strict mode, OpenExam uses:
 
@@ -179,11 +179,11 @@ If local evidence is insufficient under strict mode, OpenExam uses:
 python3 -m openexam status
 ```
 
-Status reports indexed documents, failed files, chunks, semantic index state, and detected priority answer bank files with labels.
+Status reports indexed documents, failed files, chunks, semantic index state, and detected Priority sources with labels.
 
-## Priority Answer Bank
+## Priority Sources
 
-The priority answer bank is for curated sources that should be shown before regular search hits when `--priority-answer-bank` or the UI checkbox is enabled.
+Priority sources are curated files or folders that should be shown before regular search hits when `--priority-answer-bank` or the UI checkbox is enabled. The built-in priority answer bank convention uses directories such as `answer_bank/`, and custom source rules can be added in `.openexam/priority_sources.json`.
 
 Directory names detected by default:
 
@@ -230,7 +230,7 @@ data/
     chapter-01.pdf
 ```
 
-For Markdown or TXT answer bank files, write each curated entry as a `###` section:
+For Markdown or TXT priority source files, write each curated entry as a `###` section:
 
 ```markdown
 ### What is dropout?
@@ -248,7 +248,7 @@ Then rebuild the index:
 python3 -m openexam ingest data --rebuild
 ```
 
-For files detected as answer bank sources, OpenExam groups each `###` heading with its following body as one searchable section. Regular Markdown and TXT files keep the normal paragraph extraction behavior.
+For files detected as Priority sources, OpenExam groups each `###` heading with its following body as one searchable section. Regular Markdown and TXT files keep the normal paragraph extraction behavior.
 
 ## Streamlit UI
 
@@ -267,7 +267,7 @@ The sidebar includes:
 
 - Build/update index and rebuild index actions.
 - Index and semantic status, including a `重建语义索引` button.
-- Detected priority answer bank files and labels.
+- Detected Priority sources and labels.
 - Ollama status, Start, Stop, Refresh, and local model list.
 
 Search and Ask local AI both use explicit submit buttons. Result cards can be minimized, expanded, or closed. Closing a running Ask card hides it from the UI; it does not force-stop the local LLM request.

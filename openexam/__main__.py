@@ -195,10 +195,10 @@ def cmd_status(args: argparse.Namespace) -> int:
         print(f"Textbook OCR documents: {stats['textbook_ocr_documents']}")
         print(f"Other documents: {stats['other_documents']}")
         answer_bank_sources = find_indexed_answer_bank_sources(DEFAULT_CONFIG)
-        print(f"Priority answer bank: {len(answer_bank_sources)} indexed")
+        print(f"Priority sources: {len(answer_bank_sources)} indexed")
         priority_config = load_priority_source_config(DEFAULT_CONFIG)
         for warning in priority_config.warnings:
-            print(f"Priority answer bank warning: {warning}")
+            print(f"Priority sources warning: {warning}")
         for source in answer_bank_sources:
             print(f"- {source}")
         print(f"Latest indexed at: {stats['latest_indexed_at']}")
@@ -264,8 +264,8 @@ def build_parser() -> argparse.ArgumentParser:
         default=0,
         help="Maximum results per file. 0 disables the cap.",
     )
-    search_parser.add_argument("--priority-answer-bank", dest="priority_answer_bank", action="store_true", default=False, help="Prioritize indexed files detected as priority answer bank sources.")
-    search_parser.add_argument("--no-priority-answer-bank", dest="priority_answer_bank", action="store_false", help="Do not prioritize indexed priority answer bank sources.")
+    search_parser.add_argument("--priority-answer-bank", dest="priority_answer_bank", action="store_true", default=False, help="Prioritize indexed files detected as Priority sources.")
+    search_parser.add_argument("--no-priority-answer-bank", dest="priority_answer_bank", action="store_false", help="Do not prioritize indexed Priority sources.")
     search_parser.add_argument("--open-first", action="store_true", help="Open the top result file with macOS `open`.")
     search_parser.add_argument("--auto-start-ollama", dest="auto_start_ollama", action="store_true", default=True, help="Try to start `ollama serve` for semantic search if needed. Default: enabled.")
     search_parser.add_argument("--no-auto-start-ollama", dest="auto_start_ollama", action="store_false", help="Do not try to start Ollama automatically.")
@@ -315,8 +315,8 @@ def build_parser() -> argparse.ArgumentParser:
         default="standard",
         help="Answer detail level. concise is short, standard is default, detailed gives a longer explanation.",
     )
-    ask_parser.add_argument("--priority-answer-bank", dest="priority_answer_bank", action="store_true", default=False, help="Prioritize indexed files detected as priority answer bank sources.")
-    ask_parser.add_argument("--no-priority-answer-bank", dest="priority_answer_bank", action="store_false", help="Do not prioritize indexed priority answer bank sources.")
+    ask_parser.add_argument("--priority-answer-bank", dest="priority_answer_bank", action="store_true", default=False, help="Prioritize indexed files detected as Priority sources.")
+    ask_parser.add_argument("--no-priority-answer-bank", dest="priority_answer_bank", action="store_false", help="Do not prioritize indexed Priority sources.")
     ask_parser.add_argument("--auto-start-ollama", dest="auto_start_ollama", action="store_true", default=True, help="Try to start `ollama serve` if Ollama is not reachable. Default: enabled.")
     ask_parser.add_argument("--no-auto-start-ollama", dest="auto_start_ollama", action="store_false", help="Do not try to start Ollama automatically.")
     ask_parser.set_defaults(func=cmd_ask)

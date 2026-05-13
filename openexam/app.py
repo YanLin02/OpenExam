@@ -123,16 +123,16 @@ def render_index_status() -> None:
             else:
                 st.sidebar.error(embed_result.message)
         answer_bank_sources = find_indexed_answer_bank_sources(DEFAULT_CONFIG)
-        st.sidebar.caption(f"Priority answer bank: indexed {len(answer_bank_sources)}")
+        st.sidebar.caption(f"Priority sources: indexed {len(answer_bank_sources)}")
         priority_config = load_priority_source_config(DEFAULT_CONFIG)
         for warning in priority_config.warnings:
             st.sidebar.warning(warning)
         if answer_bank_sources:
-            with st.sidebar.expander("Indexed answer bank files", expanded=False):
+            with st.sidebar.expander("Indexed priority sources", expanded=False):
                 for source in answer_bank_sources:
                     st.caption(source)
         else:
-            st.sidebar.caption("Add files under answer_bank/ and rebuild the index to enable priority answer bank sources.")
+            st.sidebar.caption("Add files under answer_bank/ and rebuild the index to enable priority sources.")
         failures = failed_documents(conn, limit=10)
         if failures:
             with st.sidebar.expander("Recent failed files", expanded=False):
@@ -315,7 +315,7 @@ def render_search_result_card(result: SearchResult, index: int, key_prefix: str 
     with st.container(border=True):
         st.markdown(f"**{index}. {result.file_name}**")
         priority_label = exam_answer_bank_label_for_result(result)
-        priority_text = f" | answer_bank={priority_label}" if priority_label else ""
+        priority_text = f" | priority_source={priority_label}" if priority_label else ""
         st.caption(
             f"{format_location(result)} | {result.source_type} | score {result.score:.2f} | "
             f"{result.mode} | {result.match_type}{priority_text}"
@@ -340,7 +340,7 @@ def render_source_card(result: SearchResult, index: int, key_prefix: str) -> Non
     with st.container(border=True):
         st.markdown(f"**[{index}] {result.file_name}**")
         priority_label = exam_answer_bank_label_for_result(result)
-        priority_text = f" | answer_bank={priority_label}" if priority_label else ""
+        priority_text = f" | priority_source={priority_label}" if priority_label else ""
         st.caption(f"{format_location(result)} | {result.source_type} | score {result.score:.2f}{priority_text}")
         st.write(format_evidence(result, index))
         render_path_expander(result.source_path, f"{key_prefix}-path-{index}-{result.chunk_db_id}")
@@ -361,7 +361,7 @@ def render_ask_summary(response, stale: bool = False) -> None:
     )
     st.caption(f"{config_text} | llm_model={response.llm_model} | policy={response.evidence_policy} | detail={response.detail}")
     if getattr(response, "priority_answer_bank", False):
-        st.caption("Priority answer bank: enabled")
+        st.caption("Priority sources: enabled")
     st.markdown(ask_answer_text(response).replace("\n", "  \n"))
 
 
