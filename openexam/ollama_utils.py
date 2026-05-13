@@ -168,13 +168,13 @@ def ensure_ollama_running(
     base_url: str,
     auto_start: bool = True,
     log_path: Path | None = None,
-    wait_seconds: float = 8.0,
+    wait_seconds: float = 20.0,
     poll_interval: float = 0.5,
 ) -> OllamaStatus:
     if is_ollama_reachable(base_url):
         return OllamaStatus(True, False, list_ollama_models(base_url), "Ollama is running.", log_path)
     if not auto_start:
-        return OllamaStatus(False, False, [], "Ollama is not reachable. Start it with: ollama serve", log_path)
+        return OllamaStatus(False, False, [], f"Ollama is not reachable after waiting 0s. Start it with: ollama serve", log_path)
 
     started, message, effective_log_path = start_ollama_server(log_path=log_path)
     if not started:
@@ -185,7 +185,7 @@ def ensure_ollama_running(
         if is_ollama_reachable(base_url):
             return OllamaStatus(True, True, list_ollama_models(base_url), "Ollama started successfully.", effective_log_path)
         time.sleep(poll_interval)
-    return OllamaStatus(False, True, [], f"Ollama did not become reachable after {wait_seconds:.0f}s. Check log: {effective_log_path}", effective_log_path)
+    return OllamaStatus(False, True, [], f"Ollama did not become reachable after waiting {wait_seconds:.0f}s. Check log: {effective_log_path}", effective_log_path)
 
 
 def choose_default_llm_model(models: list[str], preferred: str = "qwen3:8b", embedding_model: str = "bge-m3") -> str | None:

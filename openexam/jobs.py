@@ -64,6 +64,7 @@ def _run_search_job(
     per_file_cap: int,
     top_k: int,
     search_fn: SearchFunction,
+    priority_answer_bank: bool,
 ) -> SearchJobResult:
     timing: dict[str, float] = {}
     results = search_fn(
@@ -75,6 +76,7 @@ def _run_search_job(
         prefer=prefer,
         per_file_cap=per_file_cap,
         timing=timing,
+        priority_answer_bank=priority_answer_bank,
     )
     return SearchJobResult(results=results, timing=timing)
 
@@ -90,6 +92,7 @@ def submit_search_job(
     prefer: SourcePreference = "none",
     per_file_cap: int = 0,
     top_k: int = 10,
+    priority_answer_bank: bool = False,
     search_fn: SearchFunction = search_index,
 ) -> JobRecord:
     job = JobRecord(job_id=make_job_id(), kind="search", input_text=query, signature=signature)
@@ -103,6 +106,7 @@ def submit_search_job(
         per_file_cap=per_file_cap,
         top_k=top_k,
         search_fn=search_fn,
+        priority_answer_bank=priority_answer_bank,
     )
     return job
 
@@ -119,6 +123,7 @@ def _run_ask_job(
     llm_model: str,
     evidence_policy: EvidencePolicy,
     detail: AnswerDetail,
+    priority_answer_bank: bool,
     ask_fn: AskFunction,
 ) -> AskResponse:
     return ask_fn(
@@ -132,6 +137,7 @@ def _run_ask_job(
         llm_model=llm_model,
         evidence_policy=evidence_policy,
         detail=detail,
+        priority_answer_bank=priority_answer_bank,
     )
 
 
@@ -149,6 +155,7 @@ def submit_ask_job(
     llm_model: str = DEFAULT_CONFIG.llm_model,
     evidence_policy: EvidencePolicy = "warn",
     detail: AnswerDetail = "standard",
+    priority_answer_bank: bool = False,
     ask_fn: AskFunction = ask_question,
 ) -> JobRecord:
     effective_top_k = top_k if top_k is not None else config.llm_context_top_k
@@ -165,6 +172,7 @@ def submit_ask_job(
         llm_model=llm_model,
         evidence_policy=evidence_policy,
         detail=detail,
+        priority_answer_bank=priority_answer_bank,
         ask_fn=ask_fn,
     )
     return job

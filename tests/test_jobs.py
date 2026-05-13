@@ -45,13 +45,16 @@ def test_job_record_initial_status() -> None:
 
 
 def test_submit_search_job_with_fake_search() -> None:
+    seen: dict[str, object] = {}
+
     def fake_search(query, *, timing, **kwargs):
+        seen.update(kwargs)
         timing["total_time_ms"] = 1.0
         return []
 
     executor = create_search_executor(max_workers=1)
     try:
-        job = submit_search_job(executor, "Transformer", signature="sig", search_fn=fake_search)
+        job = submit_search_job(executor, "Transformer", signature="sig", priority_answer_bank=True, search_fn=fake_search)
         wait_for_job(job)
     finally:
         executor.shutdown(wait=True)
@@ -61,10 +64,14 @@ def test_submit_search_job_with_fake_search() -> None:
     assert job.result.results == []
     assert job.result.timing["total_time_ms"] == 1.0
     assert job.error is None
+    assert seen["priority_answer_bank"] is True
 
 
 def test_submit_ask_job_with_fake_ask() -> None:
+    seen: dict[str, object] = {}
+
     def fake_ask(question, *, mode, scope, prefer, per_file_cap, top_k, llm_model, evidence_policy, detail, **kwargs):
+        seen.update(kwargs)
         return AskResponse(
             question=question,
             answer="answer",
@@ -81,11 +88,12 @@ def test_submit_ask_job_with_fake_ask() -> None:
             missing_phrases=[],
             timing={"total_time_ms": 1.0},
             detail=detail,
+            priority_answer_bank=bool(kwargs["priority_answer_bank"]),
         )
 
     executor = create_ask_executor(max_workers=1)
     try:
-        job = submit_ask_job(executor, "为什么正则化可以缓解过拟合", signature="sig", ask_fn=fake_ask)
+        job = submit_ask_job(executor, "为什么正则化可以缓解过拟合", signature="sig", priority_answer_bank=True, ask_fn=fake_ask)
         wait_for_job(job)
     finally:
         executor.shutdown(wait=True)
@@ -93,7 +101,9 @@ def test_submit_ask_job_with_fake_ask() -> None:
     assert job.status == "done"
     assert isinstance(job.result, AskResponse)
     assert job.result.answer == "answer"
+    assert job.result.priority_answer_bank is True
     assert job.error is None
+    assert seen["priority_answer_bank"] is True
 
 
 def test_error_job_saves_error_message() -> None:

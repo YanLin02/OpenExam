@@ -179,6 +179,22 @@ def test_per_file_cap_limits_repeated_file_results(tmp_path) -> None:
     assert max(counts.values()) == 1
 
 
+def test_priority_answer_bank_promotes_detected_sources(tmp_path) -> None:
+    data_dir = tmp_path / "data"
+    bank_dir = data_dir / "answer_bank"
+    bank_dir.mkdir(parents=True)
+    (data_dir / "regular.md").write_text("sharedtopic identical content.", encoding="utf-8")
+    (bank_dir / "concepts.md").write_text("sharedtopic identical content.", encoding="utf-8")
+    config = AppConfig(index_dir=tmp_path / ".openexam", chunk_size=800, chunk_overlap=120)
+    ingest_directory(data_dir, config=config, rebuild=True)
+
+    regular_first = search_index("sharedtopic", top_k=2, config=config, mode="fuzzy", priority_answer_bank=False)
+    priority_first = search_index("sharedtopic", top_k=2, config=config, mode="fuzzy", priority_answer_bank=True)
+
+    assert regular_first[0].file_name == "regular.md"
+    assert priority_first[0].file_name == "concepts.md"
+
+
 def test_semantic_mode_uses_semantic_scores(tmp_path, monkeypatch) -> None:
     data_dir = tmp_path / "data"
     data_dir.mkdir()

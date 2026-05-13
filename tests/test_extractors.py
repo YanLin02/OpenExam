@@ -32,6 +32,51 @@ def test_txt_extractor_preserves_paragraphs(tmp_path) -> None:
     assert sections[1].location_type == "paragraph"
 
 
+def test_answer_bank_markdown_extracts_heading_sections(tmp_path) -> None:
+    bank_dir = tmp_path / "answer_bank"
+    bank_dir.mkdir()
+    path = bank_dir / "concepts.md"
+    path.write_text(
+        """# Notes
+
+### What is dropout?
+
+Dropout randomly disables activations during training.
+
+### What is attention?
+
+Attention weights relationships between tokens.
+""",
+        encoding="utf-8",
+    )
+
+    sections = extract_text_file(path)
+
+    assert [section.location_label for section in sections] == ["section.1", "section.2"]
+    assert sections[0].location_type == "section"
+    assert sections[0].text.startswith("### What is dropout?")
+    assert "randomly disables" in sections[0].text
+    assert sections[1].text.startswith("### What is attention?")
+
+
+def test_regular_markdown_keeps_paragraph_extraction(tmp_path) -> None:
+    path = tmp_path / "concepts.md"
+    path.write_text(
+        """# Notes
+
+### What is dropout?
+
+Dropout randomly disables activations during training.
+""",
+        encoding="utf-8",
+    )
+
+    sections = extract_text_file(path)
+
+    assert [section.location_label for section in sections] == ["para.1", "para.2", "para.3"]
+    assert all(section.location_type == "paragraph" for section in sections)
+
+
 def test_docx_extractor_preserves_paragraphs(tmp_path) -> None:
     docx = pytest.importorskip("docx")
     path = tmp_path / "sample.docx"

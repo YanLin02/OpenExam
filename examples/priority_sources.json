@@ -1,0 +1,9 @@
+{
+  "answer_bank_dirs": ["answer_bank", "reference_bank"],
+  "priority_patterns": ["curated_reference"],
+  "labels": {
+    "answer_bank": "example_answer_bank",
+    "reference_bank": "reference_bank",
+    "curated_reference": "curated_reference"
+  }
+}

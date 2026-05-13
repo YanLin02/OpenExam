@@ -59,6 +59,43 @@ def test_auto_start_ollama_uses_mock_subprocess(monkeypatch, tmp_path) -> None:
     assert (tmp_path / "ollama.pid").read_text(encoding="utf-8") == "12345"
 
 
+def test_ensure_ollama_default_wait_is_20_seconds(monkeypatch, tmp_path) -> None:
+    seen: dict[str, object] = {}
+
+    def fake_reachable(base_url, timeout=1.0):
+        return False
+
+    class FakePopen:
+        def __init__(self, *args, **kwargs):
+            self.pid = 12345
+
+    def fake_sleep(seconds):
+        seen["slept"] = seconds
+
+    times = iter([0.0, 21.0])
+    monkeypatch.setattr("openexam.ollama_utils.is_ollama_reachable", fake_reachable)
+    monkeypatch.setattr("shutil.which", lambda name: "/usr/local/bin/ollama")
+    monkeypatch.setattr("subprocess.Popen", FakePopen)
+    monkeypatch.setattr("time.perf_counter", lambda: next(times))
+    monkeypatch.setattr("time.sleep", fake_sleep)
+
+    status = ensure_ollama_running("http://127.0.0.1:11434", auto_start=True, log_path=tmp_path / "ollama.log")
+
+    assert not status.reachable
+    assert "20s" in status.message
+    assert "waiting" in status.message
+
+
+def test_ensure_ollama_no_auto_start_message_mentions_wait(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr("openexam.ollama_utils.is_ollama_reachable", lambda *args, **kwargs: False)
+
+    status = ensure_ollama_running("http://127.0.0.1:11434", auto_start=False, log_path=tmp_path / "ollama.log")
+
+    assert not status.reachable
+    assert "0s" in status.message
+    assert "ollama serve" in status.message
+
+
 def test_stop_ollama_without_openexam_pid_file_is_conservative(tmp_path) -> None:
     status = stop_ollama_server(log_path=tmp_path / "ollama.log")
 

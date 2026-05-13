@@ -134,6 +134,26 @@ def test_ask_calls_search_then_llm(monkeypatch, tmp_path) -> None:
     assert "Chapter+4-Transformer.pdf, page 37, lecture" in rendered
 
 
+def test_ask_passes_priority_answer_bank_to_search(monkeypatch, tmp_path) -> None:
+    seen: dict[str, object] = {}
+
+    def fake_search(*args, **kwargs):
+        seen.update(kwargs)
+        return []
+
+    monkeypatch.setattr("openexam.ask.search_index", fake_search)
+    response = ask_question(
+        "什么是 Dropout？",
+        config=AppConfig(index_dir=tmp_path / ".openexam"),
+        evidence_policy="strict",
+        priority_answer_bank=True,
+    )
+
+    assert seen["priority_answer_bank"] is True
+    assert response.priority_answer_bank is True
+    assert not response.llm_called
+
+
 def test_partial_evidence_warn_calls_llm_with_warning(monkeypatch, tmp_path) -> None:
     called = False
 
