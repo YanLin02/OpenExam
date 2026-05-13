@@ -43,3 +43,12 @@ def test_openexam_parser_has_ui_subcommand() -> None:
     assert args.address == "127.0.0.1"
     assert args.port == 8501
     assert args.headless is True
+
+
+def test_openexam_parser_does_not_have_solve_or_chrome_open_method() -> None:
+    parser = build_parser()
+    help_text = parser.format_help()
+    search_help = parser._subparsers._group_actions[0].choices["search"].format_help()
+
+    assert "solve" not in help_text
+    assert "--open-first-method" not in search_help

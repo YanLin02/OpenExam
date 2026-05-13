@@ -17,8 +17,9 @@ from openexam.ask import (
 )
 from openexam.config import DEFAULT_CONFIG
 from openexam.db import connect, failed_documents, index_stats
-from openexam.embeddings import embedding_status
+from openexam.embeddings import embed_if_needed, embedding_status
 from openexam.file_utils import open_local_file, reveal_local_file
+from openexam.folder_picker import pick_folder
 from openexam.ingest import ingest_directory
 from openexam.jobs import (
     JobRecord,
@@ -75,7 +76,7 @@ def show_parameter_help() -> None:
 - `per-file-cap`: 限制同一文件最多出现几条结果，避免单个 PDF 霸榜。
 - `evidence-policy`: `strict` 证据不足就拒答；`warn` 证据不足也回答但显式标注，默认推荐；`open` 无本地依据也回答但标注无本地来源。
 - `top-k`: 返回或提供给 LLM 的片段数量，越大越全面但越慢。
-- `detail`: `concise` 快速定位；`standard` 考试推荐；`detailed` 适合复习理解。
+- `detail`: `concise` 快速定位；`standard` 默认推荐；`detailed` 适合深入理解。
 """
         )
 
@@ -109,6 +110,18 @@ def render_index_status() -> None:
             )
         )
         st.sidebar.caption(f"Embedding model: {semantic.model}. {semantic.message}")
+        if st.sidebar.button("重建语义索引", use_container_width=True):
+            with st.sidebar.spinner("正在重建语义索引..."):
+                embed_result = embed_if_needed(DEFAULT_CONFIG, auto_start_ollama=True, force=True)
+            if embed_result.status == "ready":
+                st.sidebar.success(
+                    f"语义索引已重建：{embed_result.chunks_embedded} chunks, "
+                    f"{embed_result.elapsed_time_ms:.1f} ms."
+                )
+            elif embed_result.status == "skipped":
+                st.sidebar.info(embed_result.message)
+            else:
+                st.sidebar.error(embed_result.message)
         answer_bank_sources = find_indexed_answer_bank_sources(DEFAULT_CONFIG)
         st.sidebar.caption(f"Priority answer bank: indexed {len(answer_bank_sources)}")
         priority_config = load_priority_source_config(DEFAULT_CONFIG)
@@ -161,7 +174,20 @@ def render_ollama_status() -> None:
 def render_sidebar() -> None:
     with st.sidebar:
         st.header("管理")
-        data_dir = st.text_input("资料目录", value="", key="data_dir")
+        dir_col, pick_col = st.columns([4, 1.2])
+        with pick_col:
+            st.write("")
+            if st.button("选择目录", key="pick_data_dir_button", use_container_width=True):
+                result = pick_folder()
+                if result.selected_path:
+                    st.session_state["data_dir"] = result.selected_path
+                    rerun_app()
+                elif result.cancelled:
+                    st.info("已取消选择目录。")
+                else:
+                    st.warning(f"{result.error or '请选择目录。'} 请手动输入路径。")
+        with dir_col:
+            data_dir = st.text_input("资料目录", value="", key="data_dir")
         col1, col2 = st.columns(2)
         ingest_clicked = col1.button("建立/更新索引", type="primary", use_container_width=True)
         rebuild_clicked = col2.button("清空并重建", use_container_width=True)

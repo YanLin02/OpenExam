@@ -129,6 +129,8 @@ Start Ollama:
 ollama serve
 ```
 
+The first Ollama startup can be slow. If OpenExam reports that Ollama did not become reachable after waiting, start it manually with `ollama serve` in a separate terminal and retry.
+
 Build embeddings:
 
 ```bash
@@ -177,7 +179,7 @@ If local evidence is insufficient under strict mode, OpenExam uses:
 python3 -m openexam status
 ```
 
-Status reports indexed documents, failed files, chunks, semantic index state, and detected Exam answer bank files with labels.
+Status reports indexed documents, failed files, chunks, semantic index state, and detected priority answer bank files with labels.
 
 ## Priority Answer Bank
 
@@ -212,6 +214,11 @@ Example:
   }
 }
 ```
+
+The repository includes reusable examples:
+
+- [examples/answer_bank/concepts.md](examples/answer_bank/concepts.md)
+- [examples/priority_sources.json](examples/priority_sources.json)
 
 Recommended layout:
 
@@ -259,7 +266,7 @@ The UI includes:
 The sidebar includes:
 
 - Build/update index and rebuild index actions.
-- Index and semantic status.
+- Index and semantic status, including a `重建语义索引` button.
 - Detected priority answer bank files and labels.
 - Ollama status, Start, Stop, Refresh, and local model list.
 

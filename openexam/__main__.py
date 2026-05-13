@@ -8,7 +8,7 @@ from openexam.ask import LLMError, ask_question, render_ask_response
 from openexam.config import DEFAULT_CONFIG
 from openexam.db import connect, failed_documents, index_stats
 from openexam.embeddings import EmbeddingError, build_embeddings, embedding_status
-from openexam.file_utils import file_uri, open_local_file, open_pdf_page_in_chrome
+from openexam.file_utils import file_uri, open_local_file
 from openexam.ingest import ingest_directory
 from openexam.ollama_utils import ensure_ollama_running
 from openexam.priority_sources import find_indexed_answer_bank_sources, load_priority_source_config
@@ -101,10 +101,7 @@ def cmd_search(args: argparse.Namespace) -> int:
         if result.page_number is not None:
             print(file_uri(result.source_path, result.page_number))
     if args.open_first and results:
-        if args.open_first_method == "chrome" and results[0].page_number is not None:
-            ok, message = open_pdf_page_in_chrome(results[0].source_path, results[0].page_number)
-        else:
-            ok, message = open_local_file(results[0].source_path)
+        ok, message = open_local_file(results[0].source_path)
         if not ok:
             print(message, file=sys.stderr)
             return 2
@@ -198,10 +195,10 @@ def cmd_status(args: argparse.Namespace) -> int:
         print(f"Textbook OCR documents: {stats['textbook_ocr_documents']}")
         print(f"Other documents: {stats['other_documents']}")
         answer_bank_sources = find_indexed_answer_bank_sources(DEFAULT_CONFIG)
-        print(f"Exam answer bank: {len(answer_bank_sources)} indexed")
+        print(f"Priority answer bank: {len(answer_bank_sources)} indexed")
         priority_config = load_priority_source_config(DEFAULT_CONFIG)
         for warning in priority_config.warnings:
-            print(f"Exam answer bank warning: {warning}")
+            print(f"Priority answer bank warning: {warning}")
         for source in answer_bank_sources:
             print(f"- {source}")
         print(f"Latest indexed at: {stats['latest_indexed_at']}")
@@ -270,12 +267,6 @@ def build_parser() -> argparse.ArgumentParser:
     search_parser.add_argument("--priority-answer-bank", dest="priority_answer_bank", action="store_true", default=False, help="Prioritize indexed files detected as priority answer bank sources.")
     search_parser.add_argument("--no-priority-answer-bank", dest="priority_answer_bank", action="store_false", help="Do not prioritize indexed priority answer bank sources.")
     search_parser.add_argument("--open-first", action="store_true", help="Open the top result file with macOS `open`.")
-    search_parser.add_argument(
-        "--open-first-method",
-        choices=("default", "chrome"),
-        default="default",
-        help="How --open-first opens PDFs. chrome tries Google Chrome with file URI #page=N; default uses macOS open.",
-    )
     search_parser.add_argument("--auto-start-ollama", dest="auto_start_ollama", action="store_true", default=True, help="Try to start `ollama serve` for semantic search if needed. Default: enabled.")
     search_parser.add_argument("--no-auto-start-ollama", dest="auto_start_ollama", action="store_false", help="Do not try to start Ollama automatically.")
     search_parser.set_defaults(func=cmd_search)
