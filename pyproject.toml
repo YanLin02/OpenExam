@@ -26,6 +26,10 @@ openexam-ui = "openexam.launcher:main"
 dev = [
   "pytest>=8.0",
 ]
+macos-app = [
+  "pyinstaller>=6.20,<7",
+  "pywebview>=5.0,<6",
+]
 
 [tool.setuptools.packages.find]
 include = ["openexam*"]

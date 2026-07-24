@@ -3,7 +3,14 @@ from __future__ import annotations
 import json
 from io import BytesIO
 
-from openexam.ollama_utils import choose_default_llm_model, ensure_ollama_running, is_ollama_reachable, list_ollama_models, stop_ollama_server
+from openexam.ollama_utils import (
+    choose_default_llm_model,
+    ensure_ollama_running,
+    find_ollama_executable,
+    is_ollama_reachable,
+    list_ollama_models,
+    stop_ollama_server,
+)
 
 
 class FakeResponse(BytesIO):
@@ -47,7 +54,7 @@ def test_auto_start_ollama_uses_mock_subprocess(monkeypatch, tmp_path) -> None:
 
     monkeypatch.setattr("openexam.ollama_utils.is_ollama_reachable", fake_reachable)
     monkeypatch.setattr("openexam.ollama_utils.list_ollama_models", fake_models)
-    monkeypatch.setattr("shutil.which", lambda name: "/usr/local/bin/ollama")
+    monkeypatch.setattr("shutil.which", lambda name, path=None: "/usr/local/bin/ollama")
     monkeypatch.setattr("subprocess.Popen", FakePopen)
 
     status = ensure_ollama_running("http://127.0.0.1:11434", auto_start=True, log_path=tmp_path / "ollama.log", wait_seconds=1)
@@ -57,6 +64,31 @@ def test_auto_start_ollama_uses_mock_subprocess(monkeypatch, tmp_path) -> None:
     assert status.models == ["qwen3:8b"]
     assert calls["popen"] == 1
     assert (tmp_path / "ollama.pid").read_text(encoding="utf-8") == "12345"
+
+
+def test_find_ollama_executable_checks_common_macos_paths(monkeypatch) -> None:
+    seen_paths: list[str] = []
+
+    def fake_which(name, path=None):
+        seen_paths.append(path)
+        assert name == "ollama"
+        return "/opt/homebrew/bin/ollama" if "/opt/homebrew/bin" in path else None
+
+    monkeypatch.setattr("shutil.which", fake_which)
+
+    assert find_ollama_executable() == "/opt/homebrew/bin/ollama"
+    assert seen_paths
+
+
+def test_find_ollama_executable_checks_app_bundle_fallback(monkeypatch, tmp_path) -> None:
+    executable = tmp_path / "Ollama.app" / "Contents" / "Resources" / "ollama"
+    executable.parent.mkdir(parents=True)
+    executable.write_text("#!/bin/sh\n", encoding="utf-8")
+    executable.chmod(0o755)
+
+    monkeypatch.setattr("shutil.which", lambda *args, **kwargs: None)
+
+    assert find_ollama_executable(extra_candidates=[executable]) == str(executable)
 
 
 def test_ensure_ollama_default_wait_is_20_seconds(monkeypatch, tmp_path) -> None:
@@ -74,7 +106,7 @@ def test_ensure_ollama_default_wait_is_20_seconds(monkeypatch, tmp_path) -> None
 
     times = iter([0.0, 21.0])
     monkeypatch.setattr("openexam.ollama_utils.is_ollama_reachable", fake_reachable)
-    monkeypatch.setattr("shutil.which", lambda name: "/usr/local/bin/ollama")
+    monkeypatch.setattr("shutil.which", lambda name, path=None: "/usr/local/bin/ollama")
     monkeypatch.setattr("subprocess.Popen", FakePopen)
     monkeypatch.setattr("time.perf_counter", lambda: next(times))
     monkeypatch.setattr("time.sleep", fake_sleep)

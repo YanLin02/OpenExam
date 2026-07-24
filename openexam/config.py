@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import os
 from pathlib import Path
 import re
 
@@ -44,5 +45,11 @@ class AppConfig:
     def embeddings_json_path(self) -> Path:
         return self.index_dir / f"embeddings_{self.embedding_slug}.json"
 
+def build_default_config() -> AppConfig:
+    index_dir = os.environ.get("OPENEXAM_INDEX_DIR", "").strip()
+    if index_dir:
+        return AppConfig(index_dir=Path(index_dir).expanduser())
+    return AppConfig()
 
-DEFAULT_CONFIG = AppConfig()
+
+DEFAULT_CONFIG = build_default_config()

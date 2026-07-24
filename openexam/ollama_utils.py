@@ -8,6 +8,7 @@ import subprocess
 import time
 import urllib.error
 import urllib.request
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -28,6 +29,21 @@ class OllamaStopStatus:
     stopped: bool
     message: str
     pid: int | None = None
+
+
+OLLAMA_PATH_DIRS = (
+    "/opt/homebrew/bin",
+    "/usr/local/bin",
+    "/usr/bin",
+    "/bin",
+    "/usr/sbin",
+    "/sbin",
+)
+
+OLLAMA_APP_EXECUTABLES = (
+    Path("/Applications/Ollama.app/Contents/Resources/ollama"),
+    Path.home() / "Applications/Ollama.app/Contents/Resources/ollama",
+)
 
 
 def _tags_url(base_url: str) -> str:
@@ -95,19 +111,48 @@ def list_ollama_models(base_url: str, timeout: float = 2.0) -> list[str]:
     return sorted(set(names))
 
 
+def _extended_path() -> str:
+    existing_parts = [part for part in os.environ.get("PATH", "").split(os.pathsep) if part]
+    parts = [*existing_parts]
+    for path_dir in OLLAMA_PATH_DIRS:
+        if path_dir not in parts:
+            parts.append(path_dir)
+    return os.pathsep.join(parts)
+
+
+def find_ollama_executable(extra_candidates: Iterable[Path | str] = ()) -> str | None:
+    executable = shutil.which("ollama", path=_extended_path())
+    if executable:
+        return executable
+
+    for candidate in [*extra_candidates, *OLLAMA_APP_EXECUTABLES]:
+        path = Path(candidate).expanduser()
+        if path.is_file() and os.access(path, os.X_OK):
+            return str(path)
+    return None
+
+
 def start_ollama_server(log_path: Path | None = None) -> tuple[bool, str, Path | None]:
-    executable = shutil.which("ollama")
+    executable = find_ollama_executable()
     if executable is None:
-        return False, "Ollama executable not found in PATH. Install Ollama or start it manually.", log_path
+        return (
+            False,
+            "Ollama executable not found in PATH or standard macOS install locations. "
+            "Install Ollama, or start it manually with `ollama serve`.",
+            log_path,
+        )
 
     effective_log_path = log_path or (DEFAULT_CONFIG.index_dir / "ollama.log")
     effective_log_path.parent.mkdir(parents=True, exist_ok=True)
     log_file = effective_log_path.open("ab")
+    env = os.environ.copy()
+    env["PATH"] = _extended_path()
     try:
         process = subprocess.Popen(
             [executable, "serve"],
             stdout=log_file,
             stderr=subprocess.STDOUT,
+            env=env,
             start_new_session=True,
         )
     except OSError as exc:

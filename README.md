@@ -272,27 +272,43 @@ The sidebar includes:
 
 Search and Ask local AI both use explicit submit buttons. Result cards can be minimized, expanded, or closed. Closing a running Ask card hides it from the UI; it does not force-stop the local LLM request.
 
-The Ollama sidebar `Start` button attempts to run `ollama serve` and records the process id under `.openexam/ollama.pid`. The `Stop` button only stops an Ollama server that OpenExam started.
+The Ollama sidebar `Start` button attempts to run `ollama serve` and records the process id under the active OpenExam data directory. The `Stop` button only stops an Ollama server that OpenExam started.
 
-## macOS Launcher
+## macOS App
 
-After installation, start the package CLI:
-
-```bash
-openexam ui
-```
-
-Or make the bundled command file executable:
+Build a local unsigned macOS app bundle:
 
 ```bash
-chmod +x scripts/run_openexam.command
+scripts/build_macos_app.sh
 ```
 
-Then double-click:
+The build creates:
 
 ```text
-scripts/run_openexam.command
+dist/OpenExam.app
 ```
+
+Launch it from Finder or from the command line:
+
+```bash
+scripts/run_macos_app.sh --verify
+```
+
+If the app has not been built yet, build and run it in one step:
+
+```bash
+scripts/run_macos_app.sh --build-if-missing --verify
+```
+
+Double-clicking `dist/OpenExam.app` starts the local Streamlit service and opens OpenExam in the native app window. The app stores its local index, logs, and runtime state under:
+
+```text
+~/Library/Application Support/OpenExam
+```
+
+Closing the OpenExam app window or choosing Quit stops the local Streamlit service and releases its port. If OpenExam started Ollama, it also stops that OpenExam-owned Ollama process on exit. Ollama instances started manually by the user are left running.
+
+The app does not bundle Ollama or model files. Install and prepare local Ollama models separately before using semantic search or Ask local AI.
 
 ## Privacy
 
